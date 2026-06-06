@@ -23,7 +23,7 @@ WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари
 MAX_RETRIES = 3                   # Количество попыток запроса к ИИ при transient-ошибках
 BASE_DELAY = 15                   # Начальная пауза при перегрузке (в секундах)
 MAX_SESSIONS = None               # None = бесконечный цикл; целое число = остановиться после N сессий
-MAX_WORLD_PICTURE_ENTRIES = 999   # Кап на размер списков world_picture (законы/парадоксы/связи)
+MAX_WORLD_PICTURE_ENTRIES = 99   # Кап на размер списков world_picture (законы/парадоксы/связи)
 MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка long_term_knowledge (изученные темы)
 
 MEMORY_FILE = "memory.json"

@@ -8,7 +8,7 @@ Each session ends with a Markdown report in `reports/`. The agent's state lives 
 
 ## Features
 
-- 🔁 **Infinite research loop** — 2-minute pause between sessions; stop at any time (Ctrl+C) or set a hard limit with `MAX_SESSIONS`.
+- 🔁 **Infinite research loop** — configurable pause between sessions; stop at any time (Ctrl+C) or set a hard limit with `MAX_SESSIONS`.
 - 🧠 **Cumulative memory** — capped lists of laws, paradoxes, conceptual links, and studied topics persist across sessions.
 - 📝 **Markdown reports** — one file per session with the agent's reflections, source material, and world-picture evolution.
 - 🛡 **Resilient to failures** — retries 429/5xx/network errors from OpenRouter, survives Wikipedia outages (with a visible fallback counter).
