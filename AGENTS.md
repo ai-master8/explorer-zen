@@ -9,12 +9,13 @@ Standard library only. No third-party deps.
 ## Run
 
 ```bash
-python explorer_zen.py
+python explorer_zen.py          # infinite loop (default)
+python explorer_zen.py --once   # one session, then exit
 ```
 
 The Python script reads `OPENROUTER_API_KEY` from the env var first (`os.getenv("OPENROUTER_API_KEY")`). Exits with a critical-error banner if the var is unset.
 
-The script is an infinite loop (`main()` -> `execute_session()` -> `LOOP_INTERVAL` second sleep with a live countdown dashboard). Stop with `Q` (case-insensitive, no Enter required) during the sleep, or `Ctrl+C` at any time. Both paths print a clean dashboard status instead of a stack trace. There is no graceful "run one session and exit" mode.
+The script is an infinite loop (`main()` -> `execute_session()` -> `LOOP_INTERVAL` second sleep with a live countdown dashboard). Stop with `Q` (case-insensitive, no Enter required) during the sleep, or `Ctrl+C` at any time. Both paths print a clean dashboard status instead of a stack trace. `--once` runs a single session and exits cleanly (used for smoke-testing on a fresh VPS deploy).
 
 ## No build / test / lint / typecheck / CI
 

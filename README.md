@@ -55,12 +55,13 @@ Get a key at <https://openrouter.ai/keys>.
 ## Running
 
 ```bash
-python explorer_zen.py
+python explorer_zen.py          # infinite loop (default)
+python explorer_zen.py --once   # one session, then exit
 ```
 
 (On Linux/macOS, use `python3` if `python` is not aliased to Python 3.)
 
-Run from the project root. An infinite loop starts: a terminal dashboard refreshes every second, showing the current session, status, object of analysis, and state of the world picture. The dashboard's bottom line shows `Управление: Q — выход` — press `Q` (case-insensitive, no Enter) during the sleep to stop cleanly.
+Run from the project root. An infinite loop starts: a terminal dashboard refreshes every second, showing the current session, status, object of analysis, and state of the world picture. The dashboard's bottom line shows `Управление: Q — выход` — press `Q` (case-insensitive, no Enter) during the sleep to stop cleanly. `--once` runs a single session and exits — useful for smoke-testing on a fresh VPS deploy.
 
 ## Configuration
 

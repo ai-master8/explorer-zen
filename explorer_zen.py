@@ -729,6 +729,11 @@ def main():
 
     init_system()
 
+    if "--once" in sys.argv[1:]:
+        execute_session()
+        render_dashboard("РАЗОВЫЙ ЗАПУСК ЗАВЕРШЁН", "Флаг --once: одна сессия и выход.")
+        return
+
     print("\033[36m>>> СИСТЕМА ЗАПУЩЕНА. ПЕРВАЯ СЕССИЯ НАЧИНАЕТСЯ НЕМЕДЛЕННО.\033[0m")
     print()
 
