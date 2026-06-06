@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Runtime state: don't commit agent's accumulated memory
+memory.json
+memory.json.bak.*
+
+# Session output: generated per session
+reports/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
