@@ -80,6 +80,7 @@ python explorer_zen.py
 | `MAX_LONG_TERM_KNOWLEDGE_ENTRIES` | Кап на список изученных тем | `50` |
 | `MAX_TITLE_LENGTH` | Максимальная длина заголовка в дашборде (символов) | `40` |
 | `MAX_EXTRACT_LENGTH` | Максимальная длина текста (extract) в дашборде (символов) | `40` |
+| `BAR_WIDTH` | Ширина прогресс-баров в дашборде (символов) | `20` |
 | `MEMORY_FILE` | Путь к файлу памяти | `memory.json` |
 | `REPORTS_DIR` | Папка для Markdown-отчётов | `reports/` |
 

@@ -80,6 +80,7 @@ All knobs live at the top of `explorer_zen.py`, in the "ГЛОБАЛЬНАЯ К�
 | `MAX_LONG_TERM_KNOWLEDGE_ENTRIES` | Cap on the long-term knowledge list (studied topics) | `50` |
 | `MAX_TITLE_LENGTH` | Max title length in the dashboard (chars) | `40` |
 | `MAX_EXTRACT_LENGTH` | Max extract (article text) length in the dashboard (chars) | `40` |
+| `BAR_WIDTH` | Progress-bar width in the dashboard (chars) | `20` |
 | `MEMORY_FILE` | Memory file path | `memory.json` |
 | `REPORTS_DIR` | Markdown reports directory | `reports/` |
 

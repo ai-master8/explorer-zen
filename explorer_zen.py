@@ -28,6 +28,7 @@ MAX_WORLD_PICTURE_ENTRIES = 99   # Кап на размер списков world
 MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка long_term_knowledge (изученные темы)
 MAX_TITLE_LENGTH = 40            # Максимальная длина заголовка в дашборде (символов)
 MAX_EXTRACT_LENGTH = 40         # Максимальная длина текста (extract) в дашборде (символов)
+BAR_WIDTH = 20                  # Ширина прогресс-баров картины мира (в символах)
 
 MEMORY_FILE = "memory.json"
 REPORTS_DIR = "reports"
@@ -209,8 +210,8 @@ def _build_dashboard_lines(status, details, current_discovery):
 
     def bar(count, cap_val, color):
         ratio = max(0.0, min(1.0, count / cap_safe))
-        filled = int(round(ratio * 10))
-        bar_str = "█" * filled + "░" * (10 - filled)
+        filled = int(round(ratio * BAR_WIDTH))
+        bar_str = "█" * filled + "░" * (BAR_WIDTH - filled)
         return _sgr(color) + bar_str + _RESET()
 
     bar_laws = bar(laws_count, cap, 32)
