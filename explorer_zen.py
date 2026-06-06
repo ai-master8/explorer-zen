@@ -19,18 +19,18 @@ AI_MODEL = "google/gemma-4-31b-it:free"
 
 LOOP_INTERVAL = 180               # Интервал сна после успешной сессии (в секундах)
 LOOP_INTERVAL_FAILURE = 30       # Интервал сна после пропущенной/провальной сессии
-API_TIMEOUT = 30                  # Время ожидания ответа от OpenRouter (в секундах)
+API_TIMEOUT = 60                  # Время ожидания ответа от OpenRouter (в секундах)
 WIKI_SEARCH_TIMEOUT = 8           # Таймаут поискового запроса к Википедии (в секундах)
 WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари статьи (в секундах)
 MAX_RETRIES = 3                   # Количество попыток запроса к ИИ при transient-ошибках
 BASE_DELAY = 15                   # Начальная пауза при перегрузке (в секундах)
 MAX_SESSIONS = None               # None = бесконечный цикл; целое число = остановиться после N сессий
-MAX_WORLD_PICTURE_ENTRIES = 99   # Кап на размер списков world_picture (законы/парадоксы/связи)
-MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка long_term_knowledge (изученные темы)
+MAX_WORLD_PICTURE_ENTRIES = 999   # Кап на размер списков world_picture (законы/парадоксы/связи)
+MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 999  # Кап на размер списка long_term_knowledge (изученные темы)
 MAX_TITLE_LENGTH = 40            # Максимальная длина заголовка в дашборде (символов)
 MAX_EXTRACT_LENGTH = 40         # Максимальная длина текста (extract) в дашборде (символов)
 BAR_WIDTH = 20                  # Ширина прогресс-баров картины мира (в символах)
-MAX_RECENT_QUERIES = 3          # Глубина истории next_query для детекции зацикливания
+MAX_RECENT_QUERIES = 5          # Глубина истории next_query для детекции зацикливания
 WIKI_EMPTY_ROTATE_AT = 3        # Сколько подряд пустых Wiki-поисков до ротации next_query
 CYCLE_FALLBACK_TOPICS = (        # Запасные темы на случай зацикливания (не из Википедии)
     "Голографический принцип",
