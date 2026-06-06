@@ -4,6 +4,7 @@ import json
 import time
 import shutil
 import socket
+import unicodedata
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -125,6 +126,10 @@ def _terminal_size():
         return (80, 24)
 
 
+def _strip_accents(s):
+    """Убирает комбинирующие надстрочные знаки (знаки ударения и т.п.)."""
+    return ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+
 def _truncate(s, width):
     if width <= 1:
         return ""
@@ -190,11 +195,9 @@ def _build_dashboard_lines(status, details, current_discovery):
     links_count = len(wp.get("conceptual_links", []))
     fallback_count = mem.get("wiki_fallback_count", 0)
 
-    doc_title = current_discovery.get("title", "-") if current_discovery else "-"
-    doc_title = doc_title.replace("`", "")
+    doc_title = _strip_accents(current_discovery.get("title", "-") if current_discovery else "-")
     doc_src = current_discovery.get("source", "-") if current_discovery else "-"
-    doc_extract = current_discovery.get("extract", "-") if current_discovery else "-"
-    doc_extract = doc_extract.replace("`", "")
+    doc_extract = _strip_accents(current_discovery.get("extract", "-") if current_discovery else "-")
 
     columns, _ = _terminal_size()
     max_field = max(20, columns - 20)
