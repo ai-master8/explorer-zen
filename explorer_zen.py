@@ -47,6 +47,7 @@ def get_now():
 _DASHBOARD_CACHE = {"data": None, "loaded_at": 0.0}
 _DASHBOARD_CACHE_TTL = 1.0
 _OPENROUTER_STATE = {"status": "ok", "detail": ""}
+_WIKI_STATE = {"status": "ok", "detail": ""}
 
 
 def _load_memory_cached():
@@ -72,6 +73,11 @@ def _set_or_state(status, detail=""):
     """Обновляет module-level состояние OpenRouter для отображения в дашборде."""
     _OPENROUTER_STATE["status"] = status
     _OPENROUTER_STATE["detail"] = detail
+
+def _set_wiki_state(status, detail=""):
+    """Обновляет module-level состояние Wikipedia для отображения в дашборде."""
+    _WIKI_STATE["status"] = status
+    _WIKI_STATE["detail"] = detail
 
 
 _USE_ANSI = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
@@ -280,18 +286,28 @@ def _build_dashboard_lines(status, details, current_discovery):
     lines.append(f"    {_DIM()}?{_RESET()}  Парадоксы    {paradoxes_count:>4}/{cap}   {bar_px}")
     lines.append(f"    {_DIM()}∞{_RESET()}  Связи        {links_count:>4}/{cap}   {bar_lnk}")
     lines.append("")
-    if fallback_count == 0 and or_fallback_count == 0 and _OPENROUTER_STATE["status"] == "ok":
+    wiki_state_status = _WIKI_STATE["status"]
+    wiki_state_detail = _WIKI_STATE["detail"]
+    or_state_status = _OPENROUTER_STATE["status"]
+    or_state_detail = _OPENROUTER_STATE["detail"]
+
+    if (fallback_count == 0 and or_fallback_count == 0
+            and or_state_status == "ok" and wiki_state_status == "ok"):
         lines.append(f"  Сервисы:  {_GREEN()}OK{_RESET()}")
     else:
         parts = []
-        sev = "warn"  # default for cumulative fallbacks
+        sev = "warn"
         if fallback_count > 0:
             parts.append(f"Wikipedia {fallback_count}")
         if or_fallback_count > 0:
             parts.append(f"OpenRouter {or_fallback_count}")
-        if _OPENROUTER_STATE["status"] in ("transient", "error"):
-            parts.append(f"OpenRouter: {_OPENROUTER_STATE['detail']}")
-            if _OPENROUTER_STATE["status"] == "error":
+        if wiki_state_status in ("transient", "error"):
+            parts.append(f"Wikipedia: {wiki_state_detail}")
+            if wiki_state_status == "error":
+                sev = "err"
+        if or_state_status in ("transient", "error"):
+            parts.append(f"OpenRouter: {or_state_detail}")
+            if or_state_status == "error":
                 sev = "err"
         color_fn = _RED if sev == "err" else _YELLOW
         lines.append(f"  Сервисы:  {color_fn()}{' / '.join(parts)}{_RESET()}")
@@ -415,6 +431,7 @@ def init_system():
 
 def search_wikipedia(query, discovery_context):
     """Полнотекстовый поиск в Википедии с извлечением саммари и обновлением UI."""
+    _set_wiki_state("ok", "")
     render_dashboard("ПОИСК ДАННЫХ", f"Запуск индексации по теме '{query}'", discovery_context)
     encoded_query = urllib.parse.quote(query.strip())
     search_url = f"https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={encoded_query}&format=json&srlimit=1"
@@ -423,15 +440,16 @@ def search_wikipedia(query, discovery_context):
         with urllib.request.urlopen(req, timeout=WIKI_SEARCH_TIMEOUT) as response:
             search_data = json.loads(response.read().decode('utf-8'))
             search_results = search_data.get("query", {}).get("search", [])
-            
+
             if not search_results:
+                _set_wiki_state("transient", f"пустой поиск: '{query}'")
                 return None
-                
+
             actual_title = search_results[0]["title"]
-            
+
         encoded_title = urllib.parse.quote(actual_title.replace(" ", "_"))
         summary_url = f"https://ru.wikipedia.org/api/rest_v1/page/summary/{encoded_title}"
-        
+
         with urllib.request.urlopen(urllib.request.Request(summary_url, headers={'User-Agent': 'AI-Researcher-Agent/3.0 (https://localhost; contact: maintainer)'}), timeout=WIKI_SUMMARY_TIMEOUT) as res:
             data = json.loads(res.read().decode('utf-8'))
             return {
@@ -440,7 +458,8 @@ def search_wikipedia(query, discovery_context):
                 "extract": data.get("extract", "Данные отсутствуют."),
                 "url": f"https://ru.wikipedia.org/wiki/{encoded_title}"
             }
-    except Exception:
+    except Exception as e:
+        _set_wiki_state("transient", f"{type(e).__name__}")
         return None
 
 def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
@@ -618,6 +637,7 @@ def execute_session():
 
     memory["wiki_fallback_count"] = 0
     memory["openrouter_fallback_count"] = 0
+    _set_wiki_state("ok", "")
 
     render_dashboard("АНАЛИЗ СТРУКТУРЫ", "Сопоставление полученного абстракта с картиной мира", discovery)
 
