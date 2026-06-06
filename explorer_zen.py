@@ -93,7 +93,7 @@ def render_dashboard(status, details, current_discovery=None):
     print(f" ├─ Нерешенные парадоксы:   {paradoxes_count}/20")
     print(f" └─ Семантические мосты:    {links_count}/20")
     print("----------------------------------------------------------------------")
-    print(f" [СЕРВИСЫ]: Wikipedia fallbacks подряд = {fallback_count}")
+    print(f" [СЕРВИСЫ]: Сбоев Википедии подряд = {fallback_count}")
     print("----------------------------------------------------------------------")
     print(f" [ВЕКТОР СЛЕДУЮЩЕГО ПОИСКА]: {next_query}")
     print("======================================================================")
@@ -158,7 +158,7 @@ def init_system():
 
 def search_wikipedia(query, discovery_context):
     """Полнотекстовый поиск в Википедии с извлечением саммари и обновлением UI."""
-    render_dashboard("ПОИСК ДАННЫХ", f"MediaWiki: запуск индексации по теме '{query}'", discovery_context)
+    render_dashboard("ПОИСК ДАННЫХ", f"Запуск индексации по теме '{query}'", discovery_context)
     encoded_query = urllib.parse.quote(query.strip())
     search_url = f"https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={encoded_query}&format=json&srlimit=1"
     try:
@@ -201,7 +201,7 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
 
     for attempt in range(MAX_RETRIES):
         try:
-            render_dashboard("ИНФЕРЕНС ИИ", f"OpenRouter: отправка запроса (Попытка {attempt+1}/{MAX_RETRIES})", discovery_context)
+            render_dashboard("ИНФЕРЕНС ИИ", f"Отправка запроса к модели (Попытка {attempt+1}/{MAX_RETRIES})", discovery_context)
             req = urllib.request.Request(
                 OPENROUTER_ENDPOINT,
                 data=json.dumps(payload).encode('utf-8'),
@@ -217,18 +217,18 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
                 return res_data["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
             if e.code == 429 or e.code == 408 or e.code >= 500:
-                render_dashboard("СЕТЕВАЯ ПАУЗА", f"HTTP {e.code}. Ожидание {current_delay} сек...", discovery_context)
+                render_dashboard("СЕТЕВАЯ ПАУЗА", f"Код ответа {e.code}. Ожидание {current_delay} сек...", discovery_context)
                 time.sleep(current_delay)
                 current_delay *= 2
                 continue
-            return f"ERROR_REASON: HTTP Error {e.code}"
+            return f"ERROR_REASON: Код ошибки {e.code}"
         except (urllib.error.URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, IndexError) as e:
-            render_dashboard("СЕТЕВАЯ ПАУЗА", f"Transient: {type(e).__name__}. Ожидание {current_delay} сек...", discovery_context)
+            render_dashboard("СЕТЕВАЯ ПАУЗА", f"Временный сбой ({type(e).__name__}). Ожидание {current_delay} сек...", discovery_context)
             time.sleep(current_delay)
             current_delay *= 2
             continue
         except Exception as e:
-            return f"ERROR_REASON: {e}"
+            return f"ERROR_REASON: Неизвестная ошибка: {e}"
     return "ERROR_REASON: Не удалось связаться с API после серии попыток."
 
 def extract_section(text, current_header, next_header):
@@ -345,7 +345,7 @@ def execute_session():
 
     if not discovery:
         memory["wiki_fallback_count"] = memory.get("wiki_fallback_count", 0) + 1
-        render_dashboard("СБОЙ КАНАЛА ДАННЫХ", f"Википедия не вернула ответ (fallbacks={memory['wiki_fallback_count']}). Активация резервного ядра", blank_discovery)
+        render_dashboard("СБОЙ КАНАЛА ДАННЫХ", f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Активация резервного ядра", blank_discovery)
         discovery = {
             "source": "Внутреннее ядро",
             "title": "Теория информации",
