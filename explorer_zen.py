@@ -20,6 +20,7 @@ WIKI_SEARCH_TIMEOUT = 8           # Таймаут поискового запр
 WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари статьи (в секундах)
 MAX_RETRIES = 3                   # Количество попыток запроса к ИИ при transient-ошибках
 BASE_DELAY = 15                   # Начальная пауза при перегрузке (в секундах)
+MAX_SESSIONS = None               # None = бесконечный цикл; целое число = остановиться после N сессий
 
 MEMORY_FILE = "memory.json"
 REPORTS_DIR = "reports"
@@ -404,19 +405,29 @@ def main():
     if not OPENROUTER_API_KEY:
         print("КРИТИЧЕСКАЯ ОШИБКА: Задайте OPENROUTER_API_KEY.")
         return
-        
+
     init_system()
-    
+
+    sessions_done = 0
     while True:
         start_time = time.time()
         execute_session()
+        sessions_done += 1
+
+        if MAX_SESSIONS is not None and sessions_done >= MAX_SESSIONS:
+            render_dashboard(
+                "ЗАВЕРШЕНИЕ",
+                f"Лимит сессий исчерпан ({sessions_done}/{MAX_SESSIONS}). Выход."
+            )
+            break
+
         elapsed = time.time() - start_time
-        
+
         # Интерактивный цикл сна с посекундным обновлением приборной панели
         sleep_time = max(0, LOOP_INTERVAL - elapsed)
         while sleep_time > 0:
             render_dashboard(
-                "РЕЖИМ ОЖИДАНИЯ (СОН)", 
+                "РЕЖИМ ОЖИДАНИЯ (СОН)",
                 f"До старта следующей сессии осталось {int(sleep_time)} сек..."
             )
             time.sleep(1)
