@@ -8,7 +8,7 @@ Each session ends with a Markdown report in `reports/`. The agent's state lives 
 
 ## Features
 
-- 🔁 **Infinite research loop** — configurable pause between sessions; stop at any time (Ctrl+C) or set a hard limit with `MAX_SESSIONS`.
+- 🔁 **Infinite research loop** — configurable pause between sessions; exit at any time with `Q` (no Enter required) or set a hard limit with `MAX_SESSIONS`.
 - 🧠 **Cumulative memory** — capped lists of laws, paradoxes, conceptual links, and studied topics persist across sessions.
 - 📝 **Markdown reports** — one file per session with the agent's reflections, source material, and world-picture evolution.
 - 🛡 **Resilient to failures** — retries 429/5xx/network errors from OpenRouter, skips the session on persistent Wikipedia or OpenRouter failures (nothing is written to memory or reports; the session counter is not incremented).
@@ -60,7 +60,7 @@ python explorer_zen.py
 
 (On Linux/macOS, use `python3` if `python` is not aliased to Python 3.)
 
-Run from the project root. An infinite loop starts: a terminal dashboard refreshes every second, showing the current session, status, object of analysis, and state of the world picture. Stop with `Ctrl+C`.
+Run from the project root. An infinite loop starts: a terminal dashboard refreshes every second, showing the current session, status, object of analysis, and state of the world picture. The dashboard's bottom line shows `Управление: Q — выход` — press `Q` (case-insensitive, no Enter) during the sleep to stop cleanly.
 
 ## Configuration
 
