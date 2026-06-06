@@ -9,14 +9,14 @@ Each session ends with a Markdown report in `reports/`. The agent's state lives 
 ## Features
 
 - 🔁 **Infinite research loop** — 2-minute pause between sessions; stop at any time (Ctrl+C) or set a hard limit with `MAX_SESSIONS`.
-- 🧠 **Cumulative memory** — last 20 laws, 20 paradoxes, 20 links, and 50 studied topics persist across sessions.
+- 🧠 **Cumulative memory** — capped lists of laws, paradoxes, conceptual links, and studied topics persist across sessions.
 - 📝 **Markdown reports** — one file per session with the agent's reflections, source material, and world-picture evolution.
 - 🛡 **Resilient to failures** — retries 429/5xx/network errors from OpenRouter, survives Wikipedia outages (with a visible fallback counter).
 - 📦 **Python standard library only** — no third-party dependencies.
 
 ## Requirements
 
-- **Python 3.x** (tested on 3.x on Windows; the code is cross-platform, but `explorer-zen.bat` is Windows-only).
+- **Python 3.x** (tested on 3.x on Windows; the code is cross-platform).
 - **OpenRouter API key** with access to the free model `google/gemma-4-31b-it:free` (changeable — see the "Configuration" section).
 - **Internet access** to `ru.wikipedia.org` and `openrouter.ai`.
 
@@ -50,23 +50,17 @@ export OPENROUTER_API_KEY=your-openrouter-key
 
 Get a key at <https://openrouter.ai/keys>.
 
-> ⚠ **Never paste your key directly into `explorer-zen.bat` or `explorer_zen.py`** — these files may end up in a public repository, and the key would leak.
+> ⚠ **Never paste your key directly into `explorer_zen.py` or any committed file** — they may end up in a public repository, and the key would leak.
 
 ## Running
 
-**Windows:**
-```cmd
-explorer-zen.bat
-```
-
-The bat file invokes `python G:\Projects\explorer-zen\explorer_zen.py`. If the project moves, edit the path in `.bat` (line 8).
-
-**Linux / macOS:**
 ```bash
-python3 explorer_zen.py
+python explorer_zen.py
 ```
 
-An infinite loop starts: a terminal dashboard refreshes every second, showing the current session, status, object of analysis, and state of the world picture. Stop with `Ctrl+C`.
+(On Linux/macOS, use `python3` if `python` is not aliased to Python 3.)
+
+Run from the project root. An infinite loop starts: a terminal dashboard refreshes every second, showing the current session, status, object of analysis, and state of the world picture. Stop with `Ctrl+C`.
 
 ## Configuration
 
@@ -82,6 +76,8 @@ All knobs live at the top of `explorer_zen.py`, in the "ГЛОБАЛЬНАЯ К�
 | `MAX_RETRIES` | Retries on transient OpenRouter errors | `3` |
 | `BASE_DELAY` | Initial pause on 429/5xx (sec, doubled per retry) | `15` |
 | `MAX_SESSIONS` | `None` = infinite; otherwise stop after N sessions | `None` |
+| `MAX_WORLD_PICTURE_ENTRIES` | Cap on world-picture lists (laws / paradoxes / links) | `20` |
+| `MAX_LONG_TERM_KNOWLEDGE_ENTRIES` | Cap on the long-term knowledge list (studied topics) | `50` |
 | `MEMORY_FILE` | Memory file path | `memory.json` |
 | `REPORTS_DIR` | Markdown reports directory | `reports/` |
 
@@ -135,7 +131,6 @@ The LLM receives a system prompt with the already-accumulated world picture and 
 ```
 explorer-zen/
 ├── explorer_zen.py         # the whole program
-├── explorer-zen.bat        # Windows launcher
 ├── memory.json             # world picture + session counter (created on first run)
 ├── reports/                # Markdown reports per session
 │   └── report_YYYYMMDD_HHMMSS.md
@@ -148,7 +143,7 @@ explorer-zen/
 
 ## Security
 
-- 🔐 The OpenRouter key is set **only via environment variable**. Never paste it into `explorer-zen.bat`, `explorer_zen.py`, or any commit.
+- 🔐 The OpenRouter key is set **only via environment variable**. Never paste it into `explorer_zen.py` or any commit.
 - 🛡 Backups of a corrupted `memory.json` are written as `memory.json.bak.<timestamp>`; not auto-cleaned.
 - 📂 The agent writes only to `REPORTS_DIR` and `MEMORY_FILE` (relative to CWD). Do not change CWD between runs.
 

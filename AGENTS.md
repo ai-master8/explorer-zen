@@ -2,17 +2,17 @@
 
 ## What this is
 
-Single-file Python 3 agent (`explorer_zen.py`) that loops forever, pulls a Russian Wikipedia article on its current `next_query`, asks an OpenRouter LLM to reflect on it as the character "Калипсо" / "Calypso", appends extracted "laws / paradoxes / links" to a persistent "world picture" in `memory.json`, and writes a Markdown session report to `reports/`. Launcher is `explorer-zen.bat` (Windows).
+Single-file Python 3 agent (`explorer_zen.py`) that loops forever, pulls a Russian Wikipedia article on its current `next_query`, asks an OpenRouter LLM to reflect on it as the character "Калипсо" / "Calypso", appends extracted "laws / paradoxes / links" to a persistent "world picture" in `memory.json`, and writes a Markdown session report to `reports/`.
 
 Standard library only. No third-party deps.
 
 ## Run
 
-```bat
-explorer-zen.bat
+```bash
+python explorer_zen.py
 ```
 
-The bat hardcodes `OPENROUTER_API_KEY` inline and calls `python G:\Projects\explorer-zen\explorer_zen.py`. The Python script reads the key from the env var first (`os.getenv("OPENROUTER_API_KEY")`), so overriding it in the shell works. Exits with a critical-error banner if the var is unset when the bat isn't used.
+The Python script reads `OPENROUTER_API_KEY` from the env var first (`os.getenv("OPENROUTER_API_KEY")`). Exits with a critical-error banner if the var is unset.
 
 The script is an infinite loop (`main()` -> `execute_session()` -> `LOOP_INTERVAL` second sleep with a live countdown dashboard). Stop with Ctrl+C. There is no graceful "run one session and exit" mode.
 
@@ -22,8 +22,8 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
 
 ## Files
 
-- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
-- `explorer-zen.bat` — Windows launcher. Hardcodes the install path `G:\Projects\explorer-zen`; if the project moves, edit this file. It also embeds an API key — treat as a secret, do not commit, prefer the env var.
+- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MAX_WORLD_PICTURE_ENTRIES`, `MAX_LONG_TERM_KNOWLEDGE_ENTRIES`, `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
+- `explorer-zen.bat` — **removed**. Run `python explorer_zen.py` directly. (The old bat hardcoded the install path and an inline API key; both are gone.)
 - `memory.json` — persistent "world picture" and run state. Schema:
   - `character_name`, `biography` — used verbatim in the LLM system prompt.
   - `session_counter` — incremented every session.
@@ -55,5 +55,5 @@ The prompt requires the model to return five `##` sections: `Научный ан
 
 ## Security
 
-- `explorer-zen.bat` line 6 contains a live `OPENROUTER_API_KEY`. If you must modify the bat, prefer setting the key via the environment and removing the inline value before sharing the repo.
+- The OpenRouter API key is read from the `OPENROUTER_API_KEY` environment variable only — never hardcode it in `explorer_zen.py` or any committed file.
 - The script does no filesystem writes outside `REPORTS_DIR` and `MEMORY_FILE` (both relative to CWD). Don't change CWD between runs.
