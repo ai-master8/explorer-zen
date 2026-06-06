@@ -63,6 +63,17 @@ python explorer_zen.py --once   # one session, then exit
 
 Run from the project root. An infinite loop starts: a terminal dashboard refreshes every second, showing the current session, status, object of analysis, and state of the world picture. The dashboard's bottom line shows `Управление: Q — выход` — press `Q` (case-insensitive, no Enter) during the sleep to stop cleanly. `--once` runs a single session and exits — useful for smoke-testing on a fresh VPS deploy.
 
+## Deploying to a VPS
+
+The script is cross-platform (it uses `select`+`tty.setcbreak` for Q-key detection on Unix and ANSI escape codes for screen clear, never `cls` or `msvcrt`). To run it 24/7 on an Ubuntu VPS and connect to the live dashboard over SSH, see **[DEPLOY.md](DEPLOY.md)**. The recommended stack is:
+
+- `tmux` — persistent session that survives SSH disconnects.
+- `systemd` — auto-start on boot, auto-restart on crash.
+- `EnvironmentFile` in `/etc/explorer-zen/env` — keeps the API key out of the repo and out of `world`-readable files.
+- `python3 -u ... 2>&1 | tee -a explorer.log` — unbuffered output mirrored to a log file for post-mortem debugging.
+
+Total: ~10 minutes of setup, zero changes to the Python code.
+
 ## Configuration
 
 All knobs live at the top of `explorer_zen.py`, in the "ГЛОБАЛЬНАЯ КОНФИГУРАЦИЯ АГЕНТА" block:
@@ -139,6 +150,7 @@ explorer-zen/
 ├── reports/                # Markdown reports per session
 │   └── report_YYYYMMDD_HHMMSS.md
 ├── AGENTS.md               # instructions for AI agents (English)
+├── DEPLOY.md               # VPS deployment guide (Ubuntu + tmux + systemd)
 ├── README.md               # this file
 └── README.ru.md            # Russian version
 ```
