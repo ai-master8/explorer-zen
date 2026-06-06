@@ -618,6 +618,7 @@ def write_session_report(discovery, memory, parsed):
 
 
 def execute_session():
+    global _LAST_SESSION_OK
     init_system()
     invalidate_dashboard_cache()
 
@@ -660,7 +661,6 @@ def execute_session():
             f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Сессия пропущена.{rotated}",
             blank_discovery
         )
-        global _LAST_SESSION_OK
         _LAST_SESSION_OK = False
         return
 
@@ -697,7 +697,6 @@ def execute_session():
     raw_response = ask_openrouter_agent(system_instruction, user_prompt, discovery)
     if "ERROR_REASON" in raw_response:
         memory["openrouter_fallback_count"] = memory.get("openrouter_fallback_count", 0) + 1
-        global _LAST_SESSION_OK
         _LAST_SESSION_OK = False
         render_dashboard(
             "КРИТИЧЕСКИЙ СБОЙ СЕТИ",
@@ -721,7 +720,6 @@ def execute_session():
     write_session_report(discovery, memory, parsed)
 
     render_dashboard("СЕССИЯ УСПЕШНО СИНХРОНИЗИРОВАНА", f"Новая цель: {memory['next_query']}", discovery)
-    global _LAST_SESSION_OK
     _LAST_SESSION_OK = True
 
 def main():
