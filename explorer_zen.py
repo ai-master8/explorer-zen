@@ -284,14 +284,16 @@ def _build_dashboard_lines(status, details, current_discovery):
         lines.append(f"  Сервисы:  {_GREEN()}OK{_RESET()}")
     else:
         parts = []
+        sev = "warn"  # default for cumulative fallbacks
         if fallback_count > 0:
             parts.append(f"Wikipedia {fallback_count}")
         if or_fallback_count > 0:
             parts.append(f"OpenRouter {or_fallback_count}")
-        elif _OPENROUTER_STATE["status"] in ("transient", "error"):
-            color = _YELLOW if _OPENROUTER_STATE["status"] == "transient" else _RED
+        if _OPENROUTER_STATE["status"] in ("transient", "error"):
             parts.append(f"OpenRouter: {_OPENROUTER_STATE['detail']}")
-            color_fn = color
+            if _OPENROUTER_STATE["status"] == "error":
+                sev = "err"
+        color_fn = _RED if sev == "err" else _YELLOW
         lines.append(f"  Сервисы:  {color_fn()}{' / '.join(parts)}{_RESET()}")
     lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - 14)}{_RESET()}")
     lines.append(f"  Управление:  {_DIM()}Q — выход{_RESET()}")
