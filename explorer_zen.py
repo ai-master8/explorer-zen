@@ -634,9 +634,21 @@ def execute_session():
         memory["wiki_fallback_count"] = memory.get("wiki_fallback_count", 0) + 1
         rotated = ""
         if _WIKI_STATE["consecutive_empty"] >= WIKI_EMPTY_ROTATE_AT:
-            new_next, _ = _pick_next_query(memory, target_query)
+            recent = memory.setdefault("recent_queries", [])
+            new_next = target_query
+            for candidate in reversed(memory.get("long_term_knowledge", [])):
+                if candidate not in recent:
+                    new_next = candidate
+                    break
+            else:
+                for fallback in CYCLE_FALLBACK_TOPICS:
+                    if fallback not in recent:
+                        new_next = fallback
+                        break
             if new_next != target_query:
                 memory["next_query"] = new_next
+                recent.insert(0, new_next)
+                del recent[MAX_RECENT_QUERIES:]
                 rotated = f" Ротация next_query → {new_next!r}."
                 with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
                     json.dump(memory, f, ensure_ascii=False, indent=4)
