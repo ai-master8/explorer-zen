@@ -223,6 +223,7 @@ def _build_dashboard_lines(status, details, current_discovery):
     paradoxes_count = len(wp.get("unresolved_paradoxes", []))
     links_count = len(wp.get("conceptual_links", []))
     fallback_count = mem.get("wiki_fallback_count", 0)
+    or_fallback_count = mem.get("openrouter_fallback_count", 0)
 
     doc_title = _strip_accents(current_discovery.get("title", "-") if current_discovery else "-")
     doc_src = current_discovery.get("source", "-") if current_discovery else "-"
@@ -273,9 +274,15 @@ def _build_dashboard_lines(status, details, current_discovery):
     lines.append(f"    {_DIM()}?{_RESET()}  Парадоксы    {paradoxes_count:>4}/{cap}   {bar_px}")
     lines.append(f"    {_DIM()}∞{_RESET()}  Связи        {links_count:>4}/{cap}   {bar_lnk}")
     lines.append("")
-    lines.append(
-        f"  Сервисы:  Сбои Википедии подряд: {_YELLOW()}{fallback_count}{_RESET()}"
-    )
+    if fallback_count == 0 and or_fallback_count == 0:
+        lines.append(f"  Сервисы:  {_GREEN()}OK{_RESET()}")
+    else:
+        parts = []
+        if fallback_count > 0:
+            parts.append(f"Wikipedia {fallback_count}")
+        if or_fallback_count > 0:
+            parts.append(f"OpenRouter {or_fallback_count}")
+        lines.append(f"  Сервисы:  {_YELLOW()}{' / '.join(parts)}{_RESET()}")
     lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - 14)}{_RESET()}")
     lines.append(f"  Управление:  {_DIM()}Q — выход{_RESET()}")
 
@@ -358,6 +365,7 @@ def init_system():
         "next_query": "Квантовая механика",
         "long_term_knowledge": [],
         "wiki_fallback_count": 0,
+        "openrouter_fallback_count": 0,
         "recent_queries": []
     }
 
@@ -590,6 +598,7 @@ def execute_session():
         return
 
     memory["wiki_fallback_count"] = 0
+    memory["openrouter_fallback_count"] = 0
 
     render_dashboard("АНАЛИЗ СТРУКТУРЫ", "Сопоставление полученного абстракта с картиной мира", discovery)
 
@@ -619,6 +628,7 @@ def execute_session():
 
     raw_response = ask_openrouter_agent(system_instruction, user_prompt, discovery)
     if "ERROR_REASON" in raw_response:
+        memory["openrouter_fallback_count"] = memory.get("openrouter_fallback_count", 0) + 1
         render_dashboard(
             "КРИТИЧЕСКИЙ СБОЙ СЕТИ",
             f"{raw_response} Сессия пропущена: память и отчёт не обновляются.",

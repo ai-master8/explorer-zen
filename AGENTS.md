@@ -30,7 +30,8 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
   - `world_picture.core_principles` / `unresolved_paradoxes` / `conceptual_links` — each list is capped on every save (see `MAX_WORLD_PICTURE_ENTRIES` in code).
   - `next_query` — string the next session will search on Wikipedia (ru).
   - `long_term_knowledge` — append-only topic titles, capped on every save (see `MAX_LONG_TERM_KNOWLEDGE_ENTRIES` in code).
-  - `wiki_fallback_count` — consecutive Wikipedia fallbacks; reset to 0 on a successful real fetch. Bumped in `memory.json` on every stub use, visible in the dashboard.
+  - `wiki_fallback_count` — consecutive Wikipedia connection failures; reset to 0 on a successful real fetch. Bumped in `memory.json` on every failed session, visible in the dashboard. Not persisted on failure (resets on the next successful read).
+  - `openrouter_fallback_count` — consecutive OpenRouter connection failures (only persisted on a successful session write). Visible in the dashboard together with `wiki_fallback_count`.
   - `recent_queries` — ring buffer of the last `MAX_RECENT_QUERIES` `next_query` values. Used by `_pick_next_query` to detect a loop: if the LLM suggests a topic already in `recent_queries`, it's replaced by a topic from `long_term_knowledge` (most recent first) or from `CYCLE_FALLBACK_TOPICS`.
   Editing `next_query` redirects the agent; editing the lists shapes its "memories".
 - `reports/report_YYYYMMDD_HHMMSS.md` — one Markdown file per session. Treated as output, not source.
