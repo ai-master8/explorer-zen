@@ -150,7 +150,7 @@ def _poll_quit_key(seconds):
                             msvcrt.getwch()
                         except Exception:
                             pass
-                    elif ch.lower() == 'q':
+                    elif ch.lower() in ('q', 'й'):
                         return True
                     return False
                 time.sleep(0.05)
@@ -166,7 +166,7 @@ def _poll_quit_key(seconds):
                 r, _, _ = select.select([sys.stdin], [], [], seconds)
                 if r:
                     ch = sys.stdin.read(1)
-                    return ch.lower() == 'q'
+                    return ch.lower() in ('q', 'й')
                 return False
             finally:
                 try:
@@ -191,6 +191,7 @@ def _build_dashboard_lines(status, details, current_discovery):
     fallback_count = mem.get("wiki_fallback_count", 0)
 
     doc_title = current_discovery.get("title", "-") if current_discovery else "-"
+    doc_title = doc_title.replace("`", "")
     doc_src = current_discovery.get("source", "-") if current_discovery else "-"
     doc_extract = current_discovery.get("extract", "-") if current_discovery else "-"
     doc_extract = doc_extract.replace("`", "")
