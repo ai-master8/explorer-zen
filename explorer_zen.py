@@ -17,7 +17,8 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 AI_MODEL = "google/gemma-4-31b-it:free"
 
-LOOP_INTERVAL = 180               # Интервал сна между сессиями (в секундах)
+LOOP_INTERVAL = 180               # Интервал сна после успешной сессии (в секундах)
+LOOP_INTERVAL_FAILURE = 30       # Интервал сна после пропущенной/провальной сессии
 API_TIMEOUT = 30                  # Время ожидания ответа от OpenRouter (в секундах)
 WIKI_SEARCH_TIMEOUT = 8           # Таймаут поискового запроса к Википедии (в секундах)
 WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари статьи (в секундах)
@@ -49,6 +50,7 @@ _DASHBOARD_CACHE = {"data": None, "loaded_at": 0.0}
 _DASHBOARD_CACHE_TTL = 1.0
 _OPENROUTER_STATE = {"status": "ok", "detail": ""}
 _WIKI_STATE = {"status": "ok", "detail": "", "consecutive_empty": 0}
+_LAST_SESSION_OK = True          # True, если предыдущая сессия дала результат; иначе сон короче
 
 
 def _load_memory_cached():
@@ -658,6 +660,8 @@ def execute_session():
             f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Сессия пропущена.{rotated}",
             blank_discovery
         )
+        global _LAST_SESSION_OK
+        _LAST_SESSION_OK = False
         return
 
     memory["wiki_fallback_count"] = 0
@@ -693,6 +697,8 @@ def execute_session():
     raw_response = ask_openrouter_agent(system_instruction, user_prompt, discovery)
     if "ERROR_REASON" in raw_response:
         memory["openrouter_fallback_count"] = memory.get("openrouter_fallback_count", 0) + 1
+        global _LAST_SESSION_OK
+        _LAST_SESSION_OK = False
         render_dashboard(
             "КРИТИЧЕСКИЙ СБОЙ СЕТИ",
             f"{raw_response} Сессия пропущена: память и отчёт не обновляются.",
@@ -715,6 +721,8 @@ def execute_session():
     write_session_report(discovery, memory, parsed)
 
     render_dashboard("СЕССИЯ УСПЕШНО СИНХРОНИЗИРОВАНА", f"Новая цель: {memory['next_query']}", discovery)
+    global _LAST_SESSION_OK
+    _LAST_SESSION_OK = True
 
 def main():
     if not OPENROUTER_API_KEY:
@@ -722,6 +730,9 @@ def main():
         return
 
     init_system()
+
+    print("\033[36m>>> СИСТЕМА ЗАПУЩЕНА. ПЕРВАЯ СЕССИЯ НАЧИНАЕТСЯ НЕМЕДЛЕННО.\033[0m")
+    print()
 
     try:
         sessions_done = 0
@@ -738,12 +749,14 @@ def main():
                 break
 
             elapsed = time.time() - start_time
+            sleep_total = LOOP_INTERVAL if _LAST_SESSION_OK else LOOP_INTERVAL_FAILURE
 
             # Интерактивный цикл сна с посекундным обновлением приборной панели
-            sleep_time = max(0, LOOP_INTERVAL - elapsed)
+            sleep_time = max(0, sleep_total - elapsed)
             while sleep_time > 0:
+                mode = "РЕЖИМ ОЖИДАНИЯ (СОН)" if _LAST_SESSION_OK else "ПОВТОР ПОСЛЕ СБОЯ"
                 render_dashboard(
-                    "РЕЖИМ ОЖИДАНИЯ (СОН)",
+                    mode,
                     f"До старта следующей сессии осталось {int(sleep_time)} сек..."
                 )
                 if _poll_quit_key(1.0):
