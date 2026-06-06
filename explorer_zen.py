@@ -46,6 +46,7 @@ def get_now():
 
 _DASHBOARD_CACHE = {"data": None, "loaded_at": 0.0}
 _DASHBOARD_CACHE_TTL = 1.0
+_OPENROUTER_STATE = {"status": "ok", "detail": ""}
 
 
 def _load_memory_cached():
@@ -66,6 +67,11 @@ def _load_memory_cached():
 def invalidate_dashboard_cache():
     _DASHBOARD_CACHE["data"] = None
     _DASHBOARD_CACHE["loaded_at"] = 0.0
+
+def _set_or_state(status, detail=""):
+    """Обновляет module-level состояние OpenRouter для отображения в дашборде."""
+    _OPENROUTER_STATE["status"] = status
+    _OPENROUTER_STATE["detail"] = detail
 
 
 _USE_ANSI = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
@@ -274,7 +280,7 @@ def _build_dashboard_lines(status, details, current_discovery):
     lines.append(f"    {_DIM()}?{_RESET()}  Парадоксы    {paradoxes_count:>4}/{cap}   {bar_px}")
     lines.append(f"    {_DIM()}∞{_RESET()}  Связи        {links_count:>4}/{cap}   {bar_lnk}")
     lines.append("")
-    if fallback_count == 0 and or_fallback_count == 0:
+    if fallback_count == 0 and or_fallback_count == 0 and _OPENROUTER_STATE["status"] == "ok":
         lines.append(f"  Сервисы:  {_GREEN()}OK{_RESET()}")
     else:
         parts = []
@@ -282,7 +288,11 @@ def _build_dashboard_lines(status, details, current_discovery):
             parts.append(f"Wikipedia {fallback_count}")
         if or_fallback_count > 0:
             parts.append(f"OpenRouter {or_fallback_count}")
-        lines.append(f"  Сервисы:  {_YELLOW()}{' / '.join(parts)}{_RESET()}")
+        elif _OPENROUTER_STATE["status"] in ("transient", "error"):
+            color = _YELLOW if _OPENROUTER_STATE["status"] == "transient" else _RED
+            parts.append(f"OpenRouter: {_OPENROUTER_STATE['detail']}")
+            color_fn = color
+        lines.append(f"  Сервисы:  {color_fn()}{' / '.join(parts)}{_RESET()}")
     lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - 14)}{_RESET()}")
     lines.append(f"  Управление:  {_DIM()}Q — выход{_RESET()}")
 
@@ -433,6 +443,7 @@ def search_wikipedia(query, discovery_context):
 
 def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
     """Связывается с OpenRouter (gemma-4-31b-it:free): ретраит transient-ошибки, рисует шаги на дашборде."""
+    _set_or_state("ok", "")
     payload = {
         "model": AI_MODEL,
         "messages": [
@@ -459,21 +470,27 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
             )
             with urllib.request.urlopen(req, timeout=API_TIMEOUT) as response:
                 res_data = json.loads(response.read().decode('utf-8'))
+                _set_or_state("ok", "")
                 return res_data["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
             if e.code == 429 or e.code == 408 or e.code >= 500:
+                _set_or_state("transient", f"{e.code} (попытка {attempt+1}/{MAX_RETRIES})")
                 render_dashboard("СЕТЕВАЯ ПАУЗА", f"Код ответа {e.code}. Ожидание {current_delay} сек...", discovery_context)
                 time.sleep(current_delay)
                 current_delay *= 2
                 continue
+            _set_or_state("error", f"код {e.code}")
             return f"ERROR_REASON: Код ошибки {e.code}"
         except (urllib.error.URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, IndexError) as e:
+            _set_or_state("transient", f"{type(e).__name__} (попытка {attempt+1}/{MAX_RETRIES})")
             render_dashboard("СЕТЕВАЯ ПАУЗА", f"Временный сбой ({type(e).__name__}). Ожидание {current_delay} сек...", discovery_context)
             time.sleep(current_delay)
             current_delay *= 2
             continue
         except Exception as e:
+            _set_or_state("error", f"неизвестная: {e}")
             return f"ERROR_REASON: Неизвестная ошибка: {e}"
+    _set_or_state("error", f"исчерпано {MAX_RETRIES} попыток")
     return "ERROR_REASON: Не удалось связаться с API после серии попыток."
 
 def extract_section(text, current_header, next_header):
