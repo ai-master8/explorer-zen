@@ -26,7 +26,7 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
 - `explorer-zen.bat` — **removed**. Run `python explorer_zen.py` directly. (The old bat hardcoded the install path and an inline API key; both are gone.)
 - `memory.json` — persistent "world picture" and run state. Schema:
   - `character_name`, `biography` — used verbatim in the LLM system prompt.
-  - `session_counter` — incremented every session.
+  - `session_counter` — incremented only on successful sessions (both Wikipedia and OpenRouter responded).
   - `world_picture.core_principles` / `unresolved_paradoxes` / `conceptual_links` — each list is capped on every save (see `MAX_WORLD_PICTURE_ENTRIES` in code).
   - `next_query` — string the next session will search on Wikipedia (ru).
   - `long_term_knowledge` — append-only topic titles, capped on every save (see `MAX_LONG_TERM_KNOWLEDGE_ENTRIES` in code).
@@ -40,7 +40,8 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
 - `https://ru.wikipedia.org` — search + REST summary endpoint. 15s timeout, 1 result.
 - `https://openrouter.ai/api/v1/chat/completions` — model `google/gemma-4-31b-it:free` by default; 30s timeout; retries 429 with exponential backoff (`BASE_DELAY` 15s, doubled per attempt, `MAX_RETRIES` 3).
 - The free Gemma model is rate-limited and occasionally overloaded; long 429 pauses are normal, not a bug.
-- Falls back to a hardcoded "Теория информации" stub discovery if Wikipedia returns nothing — by design, not an error.
+- If Wikipedia returns nothing (network error, timeout, empty search), the session is **skipped**: nothing is written to `memory.json` or `reports/`, and `session_counter` is not incremented. The agent will retry the same `next_query` next session.
+- If OpenRouter returns an error (after exhausting `MAX_RETRIES`), the session is also **skipped** for the same reason.
 
 ## LLM output contract
 

@@ -11,7 +11,7 @@ Each session ends with a Markdown report in `reports/`. The agent's state lives 
 - 🔁 **Infinite research loop** — configurable pause between sessions; stop at any time (Ctrl+C) or set a hard limit with `MAX_SESSIONS`.
 - 🧠 **Cumulative memory** — capped lists of laws, paradoxes, conceptual links, and studied topics persist across sessions.
 - 📝 **Markdown reports** — one file per session with the agent's reflections, source material, and world-picture evolution.
-- 🛡 **Resilient to failures** — retries 429/5xx/network errors from OpenRouter, survives Wikipedia outages (with a visible fallback counter).
+- 🛡 **Resilient to failures** — retries 429/5xx/network errors from OpenRouter, skips the session on persistent Wikipedia or OpenRouter failures (nothing is written to memory or reports; the session counter is not incremented).
 - 📦 **Python standard library only** — no third-party dependencies.
 
 ## Requirements
@@ -99,10 +99,10 @@ All knobs live at the top of `explorer_zen.py`, in the "ГЛОБАЛЬНАЯ К�
             │ 1. Load memory.json      │
             └──────────────┬───────────┘
                            ▼
-            ┌──────────────────────────┐
-            │ 2. Wikipedia search      │
-            │    (or fallback stub)    │
-            └──────────────┬───────────┘
+             ┌──────────────────────────┐
+             │ 2. Wikipedia search      │
+             │    (skip on failure)     │
+             └──────────────┬───────────┘
                            ▼
             ┌──────────────────────────┐
             │ 3. OpenRouter request    │
@@ -153,7 +153,7 @@ explorer-zen/
 ## Known limitations
 
 - The free Gemma 4 31B model on OpenRouter often returns 429 — this is normal, the agent retries with exponential backoff.
-- Wikipedia search sometimes returns no results or times out. In that case, a fallback stub ("Теория информации" / Information Theory) kicks in (visible on the dashboard as "Сбоев Википедии подряд: N" / consecutive Wikipedia failures). Resets on the first successful real search.
+- Wikipedia search sometimes returns no results or times out. In that case the session is skipped: nothing is written to `memory.json` or `reports/`, the session counter is not incremented, and the agent retries the same `next_query` next session. The dashboard shows "Сбоев Википедии подряд: N" (in-memory only — resets on the next successful read).
 - The LLM-response parser is strictly tied to the five-`##`-section template. If the model reorders or renames the sections, those sections are simply lost — the agent does not crash.
 
 ## License

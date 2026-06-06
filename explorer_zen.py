@@ -544,8 +544,6 @@ def execute_session():
     with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
         memory = json.load(f)
 
-    memory["session_counter"] = memory.get("session_counter", 0) + 1
-
     target_query = memory.get("next_query", "Квантовая физика")
     wp = memory.get("world_picture", {})
 
@@ -553,15 +551,14 @@ def execute_session():
 
     if not discovery:
         memory["wiki_fallback_count"] = memory.get("wiki_fallback_count", 0) + 1
-        render_dashboard("СБОЙ КАНАЛА ДАННЫХ", f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Активация резервного ядра", blank_discovery)
-        discovery = {
-            "source": "Внутреннее ядро",
-            "title": "Теория информации",
-            "extract": "Раздел математики, изучающий законы кодирования, передачи и обработки информации.",
-            "url": "https://ru.wikipedia.org/wiki/Теория_информации"
-        }
-    else:
-        memory["wiki_fallback_count"] = 0
+        render_dashboard(
+            "СБОЙ КАНАЛА ДАННЫХ",
+            f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Сессия пропущена: память и отчёт не обновляются.",
+            blank_discovery
+        )
+        return
+
+    memory["wiki_fallback_count"] = 0
 
     render_dashboard("АНАЛИЗ СТРУКТУРЫ", "Сопоставление полученного абстракта с картиной мира", discovery)
 
@@ -591,8 +588,14 @@ def execute_session():
 
     raw_response = ask_openrouter_agent(system_instruction, user_prompt, discovery)
     if "ERROR_REASON" in raw_response:
-        render_dashboard("КРИТИЧЕСКИЙ СБОЙ СЕТИ", raw_response, discovery)
+        render_dashboard(
+            "КРИТИЧЕСКИЙ СБОЙ СЕТИ",
+            f"{raw_response} Сессия пропущена: память и отчёт не обновляются.",
+            discovery
+        )
         return
+
+    memory["session_counter"] = memory.get("session_counter", 0) + 1
 
     render_dashboard("ПАРСИНГ ОТВЕТА", "Интеграция новых сущностей в семантические слои памяти", discovery)
 
