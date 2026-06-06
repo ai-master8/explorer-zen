@@ -1,6 +1,8 @@
 import os
+import sys
 import json
 import time
+import shutil
 import socket
 import urllib.request
 import urllib.parse
@@ -31,10 +33,6 @@ REPORTS_DIR = "reports"
 def get_now():
     return datetime.now().strftime('%H:%M:%S')
 
-def clear_screen():
-    """Очищает экран терминала в зависимости от ОС."""
-    os.system('cls' if os.name == 'nt' else 'clear')
-
 _DASHBOARD_CACHE = {"data": None, "loaded_at": 0.0}
 _DASHBOARD_CACHE_TTL = 1.0
 
@@ -59,10 +57,82 @@ def invalidate_dashboard_cache():
     _DASHBOARD_CACHE["loaded_at"] = 0.0
 
 
-def render_dashboard(status, details, current_discovery=None):
-    """Формирует и отрисовывает псевдографическую приборную панель."""
-    clear_screen()
+_USE_ANSI = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+_LAST_LINES: list = []
+_LAST_TERMINAL_SIZE: tuple = (0, 0)
+_INITIALIZED: bool = False
 
+_STATUS_COLOR = {
+    "ПРОБУЖДЕНИЕ": 36,
+    "ПОИСК ДАННЫХ": 36,
+    "ИНФЕРЕНС ИИ": 36,
+    "СЕТЕВАЯ ПАУЗА": 33,
+    "СБОЙ КАНАЛА ДАННЫХ": 31,
+    "АНАЛИЗ СТРУКТУРЫ": 36,
+    "ПАРСИНГ ОТВЕТА": 36,
+    "КОМПИЛЯЦИЯ ОТЧЕТА": 36,
+    "СЕССИЯ УСПЕШНО СИНХРОНИЗИРОВАНА": 32,
+    "КРИТИЧЕСКИЙ СБОЙ СЕТИ": 31,
+    "РЕЖИМ ОЖИДАНИЯ (СОН)": 90,
+    "ЗАВЕРШЕНИЕ": 32,
+}
+
+
+def _sgr(*codes):
+    if not _USE_ANSI:
+        return ""
+    return f"\x1b[{';'.join(str(c) for c in codes)}m"
+
+
+_RESET = lambda: _sgr(0)
+_DIM = lambda: _sgr(2)
+_BOLD = lambda: _sgr(1)
+_CYAN = lambda: _sgr(36)
+_GREEN = lambda: _sgr(32)
+_YELLOW = lambda: _sgr(33)
+_RED = lambda: _sgr(31)
+_MAGENTA = lambda: _sgr(35)
+_GREY = lambda: _sgr(90)
+
+
+def _is_color_enabled():
+    return _USE_ANSI
+
+
+def _enable_vt_windows():
+    if os.name != "nt" or not _USE_ANSI:
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return
+        kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+    except Exception:
+        pass
+
+
+def _terminal_size():
+    try:
+        s = shutil.get_terminal_size()
+        return (s.columns, s.lines)
+    except Exception:
+        return (80, 24)
+
+
+def _truncate(s, width):
+    if width <= 1:
+        return ""
+    if len(s) <= width:
+        return s
+    if width <= 1:
+        return ""
+    return s[: width - 1] + "…"
+
+
+def _build_dashboard_lines(status, details, current_discovery):
     mem = _load_memory_cached()
     session_num = mem.get("session_counter", 0)
     next_query = mem.get("next_query", "-")
@@ -75,31 +145,111 @@ def render_dashboard(status, details, current_discovery=None):
     doc_title = current_discovery.get("title", "-") if current_discovery else "-"
     doc_src = current_discovery.get("source", "-") if current_discovery else "-"
     doc_url = current_discovery.get("url", "-") if current_discovery else "-"
-    if len(doc_title) > 45: doc_title = doc_title[:42] + "..."
-    if len(doc_url) > 45: doc_url = doc_url[:42] + "..."
 
-    print("======================================================================")
-    print("                 КОГНИТИВНАЯ ПАНЕЛЬ УПРАВЛЕНИЯ: КАЛИПСО              ")
-    print("======================================================================")
-    print(f" [Сессия:] №{session_num} | [Время:] {get_now()} | [Модель:] {AI_MODEL}")
-    print("----------------------------------------------------------------------")
-    print(f" [СТАТУС]: {status}")
-    print(f" [ДЕТАЛИ]: {details}")
-    print("----------------------------------------------------------------------")
-    print(" [ОБЪЕКТ ТЕКУЩЕГО АНАЛИЗА]:")
-    print(f" ├─ Тема:   {doc_title}")
-    print(f" ├─ База:   {doc_src}")
-    print(f" └─ Ссылка: {doc_url}")
-    print("----------------------------------------------------------------------")
-    print(" [СОСТОЯНИЕ КАРТИНЫ МИРА В ПАМЯТИ]:")
-    print(f" ├─ Фундаментальные законы: {laws_count}/{MAX_WORLD_PICTURE_ENTRIES}")
-    print(f" ├─ Нерешенные парадоксы:   {paradoxes_count}/{MAX_WORLD_PICTURE_ENTRIES}")
-    print(f" └─ Семантические мосты:    {links_count}/{MAX_WORLD_PICTURE_ENTRIES}")
-    print("----------------------------------------------------------------------")
-    print(f" [СЕРВИСЫ]: Сбоев Википедии подряд = {fallback_count}")
-    print("----------------------------------------------------------------------")
-    print(f" [ВЕКТОР СЛЕДУЮЩЕГО ПОИСКА]: {next_query}")
-    print("======================================================================")
+    columns, _ = _terminal_size()
+    max_field = max(20, columns - 20)
+    doc_title = _truncate(doc_title, max_field)
+    doc_url = _truncate(doc_url, max_field)
+
+    cap = MAX_WORLD_PICTURE_ENTRIES
+    cap_safe = cap if cap > 0 else 1
+
+    def bar(count, cap_val, color):
+        ratio = max(0.0, min(1.0, count / cap_safe))
+        filled = int(round(ratio * 10))
+        bar_str = "█" * filled + "░" * (10 - filled)
+        return _sgr(color) + bar_str + _RESET()
+
+    bar_laws = bar(laws_count, cap, 32)
+    bar_px = bar(paradoxes_count, cap, 35)
+    bar_lnk = bar(links_count, cap, 36)
+
+    status_color = _STATUS_COLOR.get(status, 36)
+    status_text = _sgr(1, status_color) + "●  " + status + _RESET()
+    details_text = _truncate(details, columns - 2) if details else ""
+
+    sep = _DIM() + "  · " + _RESET()
+
+    lines = []
+    lines.append(
+        _BOLD() + _CYAN() + "  КАЛИПСО" + _RESET()
+        + sep + f"Сессия {session_num}"
+        + sep + get_now()
+        + sep + _DIM() + AI_MODEL + _RESET()
+    )
+    lines.append("")
+    lines.append("  " + status_text)
+    if details_text:
+        lines.append("     " + _truncate(details_text, columns - 6))
+    lines.append("")
+    lines.append(f"  Текущая тема:    {doc_title}")
+    lines.append(f"  Источник:        {doc_src}")
+    lines.append(f"  URL:             {_DIM()}{doc_url}{_RESET()}")
+    lines.append("")
+    lines.append("  " + _BOLD() + "Картина мира" + _RESET())
+    lines.append(f"    {_DIM()}§{_RESET()}  Законы       {laws_count:>4}/{cap}   {bar_laws}")
+    lines.append(f"    {_DIM()}?{_RESET()}  Парадоксы    {paradoxes_count:>4}/{cap}   {bar_px}")
+    lines.append(f"    {_DIM()}∞{_RESET()}  Связи        {links_count:>4}/{cap}   {bar_lnk}")
+    lines.append("")
+    lines.append(
+        f"  Сервисы:  Сбои Википедии подряд: {_YELLOW()}{fallback_count}{_RESET()}"
+    )
+    lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - 14)}{_RESET()}")
+
+    return lines
+
+
+def _full_render(lines):
+    out = sys.stdout
+    if _USE_ANSI:
+        out.write("\x1b[2J\x1b[H")
+    out.write("\n".join(lines))
+    out.write("\n")
+    out.flush()
+
+
+def _partial_render(lines):
+    out = sys.stdout
+    max_rows = max(len(_LAST_LINES), len(lines))
+    for i in range(max_rows):
+        if i < len(lines):
+            new_line = lines[i]
+            old_line = _LAST_LINES[i] if i < len(_LAST_LINES) else None
+            if new_line != old_line:
+                if _USE_ANSI:
+                    out.write(f"\x1b[{i + 1};1H")
+                    out.write("\x1b[2K")
+                out.write(new_line)
+                if not _USE_ANSI:
+                    out.write("\n")
+        else:
+            if _USE_ANSI:
+                out.write(f"\x1b[{i + 1};1H\x1b[2K")
+    out.flush()
+
+
+def render_dashboard(status, details, current_discovery=None):
+    """Минималистичная приборная панель с partial-render и опциональным ANSI."""
+    global _LAST_LINES, _LAST_TERMINAL_SIZE, _INITIALIZED
+
+    if not _INITIALIZED:
+        _enable_vt_windows()
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+        _INITIALIZED = True
+
+    lines = _build_dashboard_lines(status, details, current_discovery)
+    current_size = _terminal_size()
+
+    if not _LAST_LINES or current_size != _LAST_TERMINAL_SIZE or not _USE_ANSI:
+        _full_render(lines)
+    else:
+        _partial_render(lines)
+
+    _LAST_LINES = lines
+    _LAST_TERMINAL_SIZE = current_size
 
 def init_system():
     """Инициализация расширенной структуры семантической памяти (Картины Мира)."""
