@@ -193,6 +193,7 @@ def _build_dashboard_lines(status, details, current_discovery):
     doc_title = current_discovery.get("title", "-") if current_discovery else "-"
     doc_src = current_discovery.get("source", "-") if current_discovery else "-"
     doc_extract = current_discovery.get("extract", "-") if current_discovery else "-"
+    doc_extract = doc_extract.replace("`", "")
 
     columns, _ = _terminal_size()
     max_field = max(20, columns - 20)
