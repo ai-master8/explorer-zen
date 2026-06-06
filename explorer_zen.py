@@ -144,12 +144,12 @@ def _build_dashboard_lines(status, details, current_discovery):
 
     doc_title = current_discovery.get("title", "-") if current_discovery else "-"
     doc_src = current_discovery.get("source", "-") if current_discovery else "-"
-    doc_url = current_discovery.get("url", "-") if current_discovery else "-"
+    doc_extract = current_discovery.get("extract", "-") if current_discovery else "-"
 
     columns, _ = _terminal_size()
     max_field = max(20, columns - 20)
     doc_title = _truncate(doc_title, max_field)
-    doc_url = _truncate(doc_url, max_field)
+    doc_extract = _truncate(doc_extract, max_field)
 
     cap = MAX_WORLD_PICTURE_ENTRIES
     cap_safe = cap if cap > 0 else 1
@@ -184,7 +184,7 @@ def _build_dashboard_lines(status, details, current_discovery):
     lines.append("")
     lines.append(f"  Текущая тема:    {doc_title}")
     lines.append(f"  Источник:        {doc_src}")
-    lines.append(f"  URL:             {_DIM()}{doc_url}{_RESET()}")
+    lines.append(f"  Текст:           {_DIM()}{doc_extract}{_RESET()}")
     lines.append("")
     lines.append("  " + _BOLD() + "Картина мира" + _RESET())
     lines.append(f"    {_DIM()}§{_RESET()}  Законы       {laws_count:>4}/{cap}   {bar_laws}")
