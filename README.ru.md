@@ -1,6 +1,6 @@
 # Explorer-Zen
 
-> [English version](README.en.md)
+> [English version](README.md)
 
 Автономный AI-исследователь **«Калипсо»**, который бесконечно читает русскую Википедию, размышляет над статьями через LLM и накапливает «картину мира» — собственную сеть законов, парадоксов и концептуальных связей.
 
@@ -140,7 +140,8 @@ explorer-zen/
 ├── reports/                # Markdown-отчёты по сессиям
 │   └── report_YYYYMMDD_HHMMSS.md
 ├── AGENTS.md               # инструкции для AI-агентов (англ.)
-└── README.md               # этот файл
+├── README.md               # English
+└── README.ru.md            # этот файл
 ```
 
 `memory.json` — это runtime-state, в `.gitignore`. Свои правки можно вносить, например, поменять `next_query`, чтобы перенаправить агента на другую тему, или отредактировать `character_name`/`biography`.

@@ -21,6 +21,7 @@ WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари
 MAX_RETRIES = 3                   # Количество попыток запроса к ИИ при transient-ошибках
 BASE_DELAY = 15                   # Начальная пауза при перегрузке (в секундах)
 MAX_SESSIONS = None               # None = бесконечный цикл; целое число = остановиться после N сессий
+MAX_WORLD_PICTURE_ENTRIES = 20    # Кап на размер списков world_picture (законы/парадоксы/связи)
 
 MEMORY_FILE = "memory.json"
 REPORTS_DIR = "reports"
@@ -90,9 +91,9 @@ def render_dashboard(status, details, current_discovery=None):
     print(f" └─ Ссылка: {doc_url}")
     print("----------------------------------------------------------------------")
     print(" [СОСТОЯНИЕ КАРТИНЫ МИРА В ПАМЯТИ]:")
-    print(f" ├─ Фундаментальные законы: {laws_count}/20")
-    print(f" ├─ Нерешенные парадоксы:   {paradoxes_count}/20")
-    print(f" └─ Семантические мосты:    {links_count}/20")
+    print(f" ├─ Фундаментальные законы: {laws_count}/{MAX_WORLD_PICTURE_ENTRIES}")
+    print(f" ├─ Нерешенные парадоксы:   {paradoxes_count}/{MAX_WORLD_PICTURE_ENTRIES}")
+    print(f" └─ Семантические мосты:    {links_count}/{MAX_WORLD_PICTURE_ENTRIES}")
     print("----------------------------------------------------------------------")
     print(f" [СЕРВИСЫ]: Сбоев Википедии подряд = {fallback_count}")
     print("----------------------------------------------------------------------")
@@ -281,9 +282,9 @@ def update_world_picture(memory, parsed, topic_title):
     if new_px: wp.setdefault("unresolved_paradoxes", []).extend(new_px)
     if new_l: wp.setdefault("conceptual_links", []).extend(new_l)
 
-    wp["core_principles"] = wp.get("core_principles", [])[-20:]
-    wp["unresolved_paradoxes"] = wp.get("unresolved_paradoxes", [])[-20:]
-    wp["conceptual_links"] = wp.get("conceptual_links", [])[-20:]
+    wp["core_principles"] = wp.get("core_principles", [])[-MAX_WORLD_PICTURE_ENTRIES:]
+    wp["unresolved_paradoxes"] = wp.get("unresolved_paradoxes", [])[-MAX_WORLD_PICTURE_ENTRIES:]
+    wp["conceptual_links"] = wp.get("conceptual_links", [])[-MAX_WORLD_PICTURE_ENTRIES:]
     memory["world_picture"] = wp
 
     memory["next_query"] = parsed["next_target"] if parsed["next_target"] else "Теория информации"

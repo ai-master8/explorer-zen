@@ -140,8 +140,8 @@ explorer-zen/
 ├── reports/                # Markdown reports per session
 │   └── report_YYYYMMDD_HHMMSS.md
 ├── AGENTS.md               # instructions for AI agents (English)
-├── README.md               # this file (Russian)
-└── README.en.md            # this file (English)
+├── README.md               # this file
+└── README.ru.md            # Russian version
 ```
 
 `memory.json` is runtime state, gitignored. You can edit it — for example, change `next_query` to redirect the agent to another topic, or tweak `character_name`/`biography`.
