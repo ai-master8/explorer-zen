@@ -17,7 +17,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 AI_MODEL = "google/gemma-4-31b-it:free"
 
-LOOP_INTERVAL = 120               # Интервал сна между сессиями (в секундах)
+LOOP_INTERVAL = 180               # Интервал сна между сессиями (в секундах)
 API_TIMEOUT = 30                  # Время ожидания ответа от OpenRouter (в секундах)
 WIKI_SEARCH_TIMEOUT = 8           # Таймаут поискового запроса к Википедии (в секундах)
 WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари статьи (в секундах)
@@ -29,6 +29,13 @@ MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка lo
 MAX_TITLE_LENGTH = 40            # Максимальная длина заголовка в дашборде (символов)
 MAX_EXTRACT_LENGTH = 40         # Максимальная длина текста (extract) в дашборде (символов)
 BAR_WIDTH = 20                  # Ширина прогресс-баров картины мира (в символах)
+MAX_RECENT_QUERIES = 3          # Глубина истории next_query для детекции зацикливания
+CYCLE_FALLBACK_TOPICS = (        # Запасные темы на случай зацикливания (не из Википедии)
+    "Голографический принцип",
+    "Квантовая запутанность",
+    "Тёмная материя",
+    "Стрела времени",
+)
 
 MEMORY_FILE = "memory.json"
 REPORTS_DIR = "reports"
@@ -130,6 +137,27 @@ def _terminal_size():
 def _strip_accents(s):
     """Убирает комбинирующие надстрочные знаки (знаки ударения и т.п.)."""
     return ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+
+def _pick_next_query(memory, proposed):
+    """Детектирует цикл: если proposed уже в recent_queries — берёт тему из
+    long_term_knowledge (с конца) или из CYCLE_FALLBACK_TOPICS. Возвращает
+    (final, cycle_detected) и обновляет recent_queries в memory (cap MAX_RECENT_QUERIES)."""
+    recent = memory.setdefault("recent_queries", [])
+    cycle_detected = proposed in recent
+    final = proposed
+    if cycle_detected:
+        for candidate in reversed(memory.get("long_term_knowledge", [])):
+            if candidate not in recent:
+                final = candidate
+                break
+        else:
+            for fallback in CYCLE_FALLBACK_TOPICS:
+                if fallback not in recent:
+                    final = fallback
+                    break
+    recent.insert(0, final)
+    del recent[MAX_RECENT_QUERIES:]
+    return final, cycle_detected
 
 def _truncate(s, width):
     if width <= 1:
@@ -329,7 +357,8 @@ def init_system():
         },
         "next_query": "Квантовая механика",
         "long_term_knowledge": [],
-        "wiki_fallback_count": 0
+        "wiki_fallback_count": 0,
+        "recent_queries": []
     }
 
     if not os.path.exists(MEMORY_FILE):
@@ -493,7 +522,9 @@ def update_world_picture(memory, parsed, topic_title):
     wp["conceptual_links"] = wp.get("conceptual_links", [])[-MAX_WORLD_PICTURE_ENTRIES:]
     memory["world_picture"] = wp
 
-    memory["next_query"] = parsed["next_target"] if parsed["next_target"] else "Теория информации"
+    proposed = parsed["next_target"] if parsed["next_target"] else "Теория информации"
+    final_next, _ = _pick_next_query(memory, proposed)
+    memory["next_query"] = final_next
 
     ltk = memory.setdefault("long_term_knowledge", [])
     if topic_title not in ltk:

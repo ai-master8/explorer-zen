@@ -22,7 +22,7 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
 
 ## Files
 
-- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MAX_WORLD_PICTURE_ENTRIES`, `MAX_LONG_TERM_KNOWLEDGE_ENTRIES`, `MAX_TITLE_LENGTH`, `MAX_EXTRACT_LENGTH`, `BAR_WIDTH`, `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
+- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MAX_WORLD_PICTURE_ENTRIES`, `MAX_LONG_TERM_KNOWLEDGE_ENTRIES`, `MAX_TITLE_LENGTH`, `MAX_EXTRACT_LENGTH`, `BAR_WIDTH`, `MAX_RECENT_QUERIES`, `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
 - `explorer-zen.bat` — **removed**. Run `python explorer_zen.py` directly. (The old bat hardcoded the install path and an inline API key; both are gone.)
 - `memory.json` — persistent "world picture" and run state. Schema:
   - `character_name`, `biography` — used verbatim in the LLM system prompt.
@@ -31,6 +31,7 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
   - `next_query` — string the next session will search on Wikipedia (ru).
   - `long_term_knowledge` — append-only topic titles, capped on every save (see `MAX_LONG_TERM_KNOWLEDGE_ENTRIES` in code).
   - `wiki_fallback_count` — consecutive Wikipedia fallbacks; reset to 0 on a successful real fetch. Bumped in `memory.json` on every stub use, visible in the dashboard.
+  - `recent_queries` — ring buffer of the last `MAX_RECENT_QUERIES` `next_query` values. Used by `_pick_next_query` to detect a loop: if the LLM suggests a topic already in `recent_queries`, it's replaced by a topic from `long_term_knowledge` (most recent first) or from `CYCLE_FALLBACK_TOPICS`.
   Editing `next_query` redirects the agent; editing the lists shapes its "memories".
 - `reports/report_YYYYMMDD_HHMMSS.md` — one Markdown file per session. Treated as output, not source.
 - `memory.json.bak.YYYYMMDD_HHMMSS` — backup of a corrupted `memory.json` written by `init_system` before resetting to defaults. Not auto-cleaned.

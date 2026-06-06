@@ -154,6 +154,7 @@ explorer-zen/
 
 - The free Gemma 4 31B model on OpenRouter often returns 429 — this is normal, the agent retries with exponential backoff.
 - Wikipedia search sometimes returns no results or times out. In that case the session is skipped: nothing is written to `memory.json` or `reports/`, the session counter is not incremented, and the agent retries the same `next_query` next session. The dashboard shows "Сбоев Википедии подряд: N" (in-memory only — resets on the next successful read).
+- The LLM can get stuck suggesting the same `next_query` over and over (e.g. when Wikipedia redirects it). The last `MAX_RECENT_QUERIES` topics are kept in `memory.json["recent_queries"]`; if the LLM repeats one, `_pick_next_query` replaces it with the most recent topic from `long_term_knowledge` or a hardcoded fallback (`Голографический принцип`, `Квантовая запутанность`, `Тёмная материя`, `Стрела времени`).
 - The LLM-response parser is strictly tied to the five-`##`-section template. If the model reorders or renames the sections, those sections are simply lost — the agent does not crash.
 
 ## License
