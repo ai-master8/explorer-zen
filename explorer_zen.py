@@ -26,6 +26,7 @@ MAX_SESSIONS = None               # None = бесконечный цикл; це
 MAX_WORLD_PICTURE_ENTRIES = 99   # Кап на размер списков world_picture (законы/парадоксы/связи)
 MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка long_term_knowledge (изученные темы)
 MAX_TITLE_LENGTH = 40            # Максимальная длина заголовка в дашборде (символов)
+MAX_EXTRACT_LENGTH = 40         # Максимальная длина текста (extract) в дашборде (символов)
 
 MEMORY_FILE = "memory.json"
 REPORTS_DIR = "reports"
@@ -75,6 +76,7 @@ _STATUS_COLOR = {
     "СЕССИЯ УСПЕШНО СИНХРОНИЗИРОВАНА": 32,
     "КРИТИЧЕСКИЙ СБОЙ СЕТИ": 31,
     "РЕЖИМ ОЖИДАНИЯ (СОН)": 90,
+    "ОСТАНОВКА ПО ЗАПРОСУ": 33,
     "ЗАВЕРШЕНИЕ": 32,
 }
 
@@ -132,6 +134,51 @@ def _truncate(s, width):
         return ""
     return s[: width - 1] + "…"
 
+def _poll_quit_key(seconds):
+    """Спит `seconds` секунд, возвращает True, если нажата Q (без Enter)."""
+    if seconds <= 0:
+        return False
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            t_end = time.time() + seconds
+            while time.time() < t_end:
+                if msvcrt.kbhit():
+                    ch = msvcrt.getwch()
+                    if ch in ('\x00', '\xe0'):
+                        try:
+                            msvcrt.getwch()
+                        except Exception:
+                            pass
+                    elif ch.lower() == 'q':
+                        return True
+                    return False
+                time.sleep(0.05)
+            return False
+        if sys.stdin.isatty():
+            import select
+            import tty
+            import termios
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setcbreak(fd)
+                r, _, _ = select.select([sys.stdin], [], [], seconds)
+                if r:
+                    ch = sys.stdin.read(1)
+                    return ch.lower() == 'q'
+                return False
+            finally:
+                try:
+                    termios.tcsetattr(fd, termios.TCSAFLUSH, old)
+                except Exception:
+                    pass
+        time.sleep(seconds)
+        return False
+    except Exception:
+        time.sleep(seconds)
+        return False
+
 
 def _build_dashboard_lines(status, details, current_discovery):
     mem = _load_memory_cached()
@@ -150,7 +197,7 @@ def _build_dashboard_lines(status, details, current_discovery):
     columns, _ = _terminal_size()
     max_field = max(20, columns - 20)
     doc_title = _truncate(doc_title, MAX_TITLE_LENGTH)
-    doc_extract = _truncate(doc_extract, max_field)
+    doc_extract = _truncate(doc_extract, MAX_EXTRACT_LENGTH)
 
     cap = MAX_WORLD_PICTURE_ENTRIES
     cap_safe = cap if cap > 0 else 1
@@ -196,6 +243,7 @@ def _build_dashboard_lines(status, details, current_discovery):
         f"  Сервисы:  Сбои Википедии подряд: {_YELLOW()}{fallback_count}{_RESET()}"
     )
     lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - 14)}{_RESET()}")
+    lines.append(f"  Управление:  {_DIM()}Q — выход{_RESET()}")
 
     return lines
 
@@ -561,30 +609,41 @@ def main():
 
     init_system()
 
-    sessions_done = 0
-    while True:
-        start_time = time.time()
-        execute_session()
-        sessions_done += 1
+    try:
+        sessions_done = 0
+        while True:
+            start_time = time.time()
+            execute_session()
+            sessions_done += 1
 
-        if MAX_SESSIONS is not None and sessions_done >= MAX_SESSIONS:
-            render_dashboard(
-                "ЗАВЕРШЕНИЕ",
-                f"Лимит сессий исчерпан ({sessions_done}/{MAX_SESSIONS}). Выход."
-            )
-            break
+            if MAX_SESSIONS is not None and sessions_done >= MAX_SESSIONS:
+                render_dashboard(
+                    "ЗАВЕРШЕНИЕ",
+                    f"Лимит сессий исчерпан ({sessions_done}/{MAX_SESSIONS}). Выход."
+                )
+                break
 
-        elapsed = time.time() - start_time
+            elapsed = time.time() - start_time
 
-        # Интерактивный цикл сна с посекундным обновлением приборной панели
-        sleep_time = max(0, LOOP_INTERVAL - elapsed)
-        while sleep_time > 0:
-            render_dashboard(
-                "РЕЖИМ ОЖИДАНИЯ (СОН)",
-                f"До старта следующей сессии осталось {int(sleep_time)} сек..."
-            )
-            time.sleep(1)
-            sleep_time -= 1
+            # Интерактивный цикл сна с посекундным обновлением приборной панели
+            sleep_time = max(0, LOOP_INTERVAL - elapsed)
+            while sleep_time > 0:
+                render_dashboard(
+                    "РЕЖИМ ОЖИДАНИЯ (СОН)",
+                    f"До старта следующей сессии осталось {int(sleep_time)} сек..."
+                )
+                if _poll_quit_key(1.0):
+                    render_dashboard(
+                        "ОСТАНОВКА ПО ЗАПРОСУ",
+                        "Нажата Q. Агент остановлен пользователем."
+                    )
+                    return
+                sleep_time -= 1
+    except KeyboardInterrupt:
+        render_dashboard(
+            "ОСТАНОВКА",
+            "Прервано пользователем (Ctrl+C)."
+        )
 
 if __name__ == "__main__":
     main()

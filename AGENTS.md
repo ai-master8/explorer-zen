@@ -14,7 +14,7 @@ python explorer_zen.py
 
 The Python script reads `OPENROUTER_API_KEY` from the env var first (`os.getenv("OPENROUTER_API_KEY")`). Exits with a critical-error banner if the var is unset.
 
-The script is an infinite loop (`main()` -> `execute_session()` -> `LOOP_INTERVAL` second sleep with a live countdown dashboard). Stop with Ctrl+C. There is no graceful "run one session and exit" mode.
+The script is an infinite loop (`main()` -> `execute_session()` -> `LOOP_INTERVAL` second sleep with a live countdown dashboard). Stop with `Q` (case-insensitive, no Enter required) during the sleep, or `Ctrl+C` at any time. Both paths print a clean dashboard status instead of a stack trace. There is no graceful "run one session and exit" mode.
 
 ## No build / test / lint / typecheck / CI
 
@@ -22,7 +22,7 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
 
 ## Files
 
-- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MAX_WORLD_PICTURE_ENTRIES`, `MAX_LONG_TERM_KNOWLEDGE_ENTRIES`, `MAX_TITLE_LENGTH`, `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
+- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MAX_WORLD_PICTURE_ENTRIES`, `MAX_LONG_TERM_KNOWLEDGE_ENTRIES`, `MAX_TITLE_LENGTH`, `MAX_EXTRACT_LENGTH`, `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
 - `explorer-zen.bat` — **removed**. Run `python explorer_zen.py` directly. (The old bat hardcoded the install path and an inline API key; both are gone.)
 - `memory.json` — persistent "world picture" and run state. Schema:
   - `character_name`, `biography` — used verbatim in the LLM system prompt.

@@ -79,6 +79,7 @@ python explorer_zen.py
 | `MAX_WORLD_PICTURE_ENTRIES` | Кап на списки картины мира (законы / парадоксы / связи) | `20` |
 | `MAX_LONG_TERM_KNOWLEDGE_ENTRIES` | Кап на список изученных тем | `50` |
 | `MAX_TITLE_LENGTH` | Максимальная длина заголовка в дашборде (символов) | `40` |
+| `MAX_EXTRACT_LENGTH` | Максимальная длина текста (extract) в дашборде (символов) | `40` |
 | `MEMORY_FILE` | Путь к файлу памяти | `memory.json` |
 | `REPORTS_DIR` | Папка для Markdown-отчётов | `reports/` |
 
