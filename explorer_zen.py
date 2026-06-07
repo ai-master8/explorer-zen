@@ -19,6 +19,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 # AI_MODEL = "google/gemma-4-31b-it:free"
 AI_MODEL = "deepseek/deepseek-v4-flash"
+REASONING_EFFORT = "high"       # OpenRouter reasoning.effort: xhigh | high | medium | low | minimal | none
 
 LOOP_INTERVAL = 20               # Интервал сна после успешной сессии (в секундах)
 LOOP_INTERVAL_FAILURE = 10       # Интервал сна после пропущенной/провальной сессии
@@ -273,11 +274,14 @@ def _build_dashboard_lines(status, details, current_discovery):
     sep = _DIM() + "  · " + _RESET()
 
     lines = []
+    thinking_suffix = (
+        f" · thinking:{REASONING_EFFORT}" if REASONING_EFFORT and REASONING_EFFORT != "none" else ""
+    )
     lines.append(
         _BOLD() + _CYAN() + "  КАЛИПСО" + _RESET()
         + sep + f"Сессия {session_num}"
         + sep + get_now()
-        + sep + _DIM() + AI_MODEL + _RESET()
+        + sep + _DIM() + AI_MODEL + thinking_suffix + _RESET()
     )
     lines.append("")
     lines.append("  " + status_text)
@@ -498,7 +502,10 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 1.0
+        "temperature": 1.0,
+        "reasoning": {
+            "effort": REASONING_EFFORT
+        }
     }
 
     current_delay = BASE_DELAY
