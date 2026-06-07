@@ -158,6 +158,33 @@ def _strip_accents(s):
     """Убирает комбинирующие надстрочные знаки (знаки ударения и т.п.)."""
     return ''.join(c for c in s if unicodedata.category(c) != 'Mn')
 
+
+def _wikitext_to_plain(wikitext):
+    """Превращает MediaWiki wikitext в plain text, пригодный для LLM.
+    Эвристика: убирает шаблоны, разметку, ссылки, заголовки. Не идеальна,
+    но достаточна для grounding — LLM получает читаемый prose без шума."""
+    if not wikitext:
+        return ""
+    s = wikitext
+    s = re.sub(r'<!--.*?-->', '', s, flags=re.DOTALL)
+    s = re.sub(r'<ref[^>]*>.*?</ref>', '', s, flags=re.DOTALL)
+    s = re.sub(r'<ref[^>]*/?>', '', s)
+    s = re.sub(r'\{\|.*?\|\}', '', s, flags=re.DOTALL)
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(r'\{\{[^{}]*\}\}', '', s)
+    s = re.sub(r'\[\[(?:File|Image|Файл|Изображение):[^\]]*\]\]', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'\[\[(?:Category|Категория):[^\]]*\]\]', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'\[\[(?:[^\]|]*\|)?([^\]]+)\]\]', r'\1', s)
+    s = re.sub(r"'''(.*?)'''", r'\1', s, flags=re.DOTALL)
+    s = re.sub(r"''(.*?)''", r'\1', s, flags=re.DOTALL)
+    s = re.sub(r'={2,}[^=]*={2,}', '', s)
+    s = re.sub(r'<[^>]+>', '', s)
+    s = re.sub(r'\n\s*\n+', '\n\n', s)
+    s = re.sub(r'[ \t]+', ' ', s)
+    return s.strip()
+
 def _pick_next_query(memory, proposed):
     """Детектирует цикл: если proposed уже в recent_queries — берёт тему из
     long_term_knowledge (с конца) или из CYCLE_FALLBACK_TOPICS. Возвращает
@@ -470,8 +497,7 @@ def search_wikipedia(query, discovery_context):
         encoded_title = urllib.parse.quote(actual_title.replace(" ", "_"))
         summary_url = (
             f"https://ru.wikipedia.org/w/api.php?action=query"
-            f"&prop=extracts&explaintext=1"
-            f"&exchars={WIKI_EXTRACT_MAX_CHARS}"
+            f"&prop=revisions&rvprop=content&rvslots=main"
             f"&titles={encoded_title}&format=json"
         )
 
@@ -479,7 +505,9 @@ def search_wikipedia(query, discovery_context):
             data = json.loads(res.read().decode('utf-8'))
             pages = data.get("query", {}).get("pages", {})
             page = next(iter(pages.values())) if pages else {}
-            extract = page.get("extract", "Данные отсутствуют.").strip()
+            revisions = page.get("revisions") or [{}]
+            content = revisions[0].get("slots", {}).get("main", {}).get("*", "") if revisions else ""
+            extract = _wikitext_to_plain(content)[:WIKI_EXTRACT_MAX_CHARS].strip() or "Данные отсутствуют."
             title = page.get("title", actual_title)
             _WIKI_STATE["consecutive_empty"] = 0
             return {
