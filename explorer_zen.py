@@ -49,8 +49,8 @@ REPORTS_DIR = "reports"
 def get_now():
     return datetime.now().strftime('%H:%M:%S')
 
-_DASHBOARD_CACHE = {"data": None, "loaded_at": 0.0}
-_DASHBOARD_CACHE_TTL = 1.0
+_MEMORY_CACHE = {"data": None, "loaded_at": 0.0}
+_MEMORY_CACHE_TTL = 1.0
 _OPENROUTER_STATE = {"status": "ok", "detail": ""}
 _WIKI_STATE = {"status": "ok", "detail": "", "consecutive_empty": 0}
 _LAST_SESSION_OK = True          # True, если предыдущая сессия дала результат; иначе сон короче
@@ -59,28 +59,28 @@ _SYNTHESIS_DONE = False           # True, когда финальный синт
 
 def _load_memory_cached():
     now = time.time()
-    if _DASHBOARD_CACHE["data"] is not None and (now - _DASHBOARD_CACHE["loaded_at"]) < _DASHBOARD_CACHE_TTL:
-        return _DASHBOARD_CACHE["data"]
+    if _MEMORY_CACHE["data"] is not None and (now - _MEMORY_CACHE["loaded_at"]) < _MEMORY_CACHE_TTL:
+        return _MEMORY_CACHE["data"]
     if os.path.exists(MEMORY_FILE):
         try:
             with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
-                _DASHBOARD_CACHE["data"] = json.load(f)
-                _DASHBOARD_CACHE["loaded_at"] = now
-                return _DASHBOARD_CACHE["data"]
+                _MEMORY_CACHE["data"] = json.load(f)
+                _MEMORY_CACHE["loaded_at"] = now
+                return _MEMORY_CACHE["data"]
         except Exception:
             pass
     return {}
 
 
-def invalidate_dashboard_cache():
-    _DASHBOARD_CACHE["data"] = None
-    _DASHBOARD_CACHE["loaded_at"] = 0.0
+def invalidate_memory_cache():
+    _MEMORY_CACHE["data"] = None
+    _MEMORY_CACHE["loaded_at"] = 0.0
 
 def save_memory(memory):
-    """Записывает memory.json на диск и сбрасывает кэш дашборда."""
+    """Записывает memory.json на диск и сбрасывает кэш памяти."""
     with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(memory, f, ensure_ascii=False, indent=4)
-    invalidate_dashboard_cache()
+    invalidate_memory_cache()
 
 def _set_service_state(state, status, detail=""):
     """Обновляет module-level состояние сервиса (OpenRouter / Wikipedia) для дашборда."""
@@ -116,15 +116,31 @@ def _sgr(*codes):
     return f"\x1b[{';'.join(str(c) for c in codes)}m"
 
 
-_RESET = lambda: _sgr(0)
-_DIM = lambda: _sgr(2)
-_BOLD = lambda: _sgr(1)
-_CYAN = lambda: _sgr(36)
-_GREEN = lambda: _sgr(32)
-_YELLOW = lambda: _sgr(33)
-_RED = lambda: _sgr(31)
-_MAGENTA = lambda: _sgr(35)
-_GREY = lambda: _sgr(90)
+class _Color:
+    """ANSI color helper. Вызывается без аргументов: `_RED()` → '\\x1b[31m'."""
+    def __init__(self, *codes):
+        self._codes = codes
+    def __call__(self):
+        return _sgr(*self._codes)
+
+
+_RESET = _Color(0)
+_DIM = _Color(2)
+_BOLD = _Color(1)
+_CYAN = _Color(36)
+_GREEN = _Color(32)
+_YELLOW = _Color(33)
+_RED = _Color(31)
+_MAGENTA = _Color(35)
+_GREY = _Color(90)
+
+
+# Геометрия дашборда (в символах)
+_DASH_FIELD_MARGIN = 22         # отступ от правого края терминала для текстовых полей
+_DASH_MIN_FIELD = 20            # минимальная ширина поля, чтобы текст не сжимался в точку
+_DASH_GOAL_INDENT = 14          # отступ перед "Цель:" в строке
+_DASH_DETAIL_INDENT = 5         # дополнительный отступ для строк details под статусом
+_DASH_RIGHT_PAD = 2             # правый отступ для всех строк (под курсор и т.п.)
 
 
 def _is_color_enabled():
@@ -261,6 +277,15 @@ def _poll_quit_key(seconds):
         return False
 
 
+def _render_bar(count, cap_val, color):
+    """Прогресс-бар: заполненные/пустые клетки в цветовой обёртке."""
+    cap_safe = cap_val if cap_val > 0 else 1
+    ratio = max(0.0, min(1.0, count / cap_safe))
+    filled = int(round(ratio * BAR_WIDTH))
+    bar_str = "█" * filled + "░" * (BAR_WIDTH - filled)
+    return _sgr(color) + bar_str + _RESET()
+
+
 def _build_dashboard_lines(status, details, current_discovery):
     mem = _load_memory_cached()
     session_num = mem.get("session_counter", 0)
@@ -277,26 +302,19 @@ def _build_dashboard_lines(status, details, current_discovery):
     doc_extract = _strip_accents(current_discovery.get("extract", "-") if current_discovery else "-")
 
     columns, _ = _terminal_size()
-    max_field = max(20, columns - 22)
+    max_field = max(_DASH_MIN_FIELD, columns - _DASH_FIELD_MARGIN)
     doc_title = _truncate(doc_title, max_field)
-    doc_extract = _truncate(doc_extract, max(20, columns - 22))
+    doc_extract = _truncate(doc_extract, max(_DASH_MIN_FIELD, columns - _DASH_FIELD_MARGIN))
 
     cap = MAX_WORLD_PICTURE_ENTRIES
-    cap_safe = cap if cap > 0 else 1
 
-    def bar(count, cap_val, color):
-        ratio = max(0.0, min(1.0, count / cap_safe))
-        filled = int(round(ratio * BAR_WIDTH))
-        bar_str = "█" * filled + "░" * (BAR_WIDTH - filled)
-        return _sgr(color) + bar_str + _RESET()
-
-    bar_laws = bar(laws_count, cap, 32)
-    bar_px = bar(paradoxes_count, cap, 35)
-    bar_lnk = bar(links_count, cap, 36)
+    bar_laws = _render_bar(laws_count, cap, 32)
+    bar_px = _render_bar(paradoxes_count, cap, 35)
+    bar_lnk = _render_bar(links_count, cap, 36)
 
     status_color = _STATUS_COLOR.get(status, 36)
     status_text = _sgr(1, status_color) + "●  " + status + _RESET()
-    details_text = _truncate(details, columns - 2) if details else ""
+    details_text = _truncate(details, columns - _DASH_RIGHT_PAD) if details else ""
 
     sep = _DIM() + "  · " + _RESET()
 
@@ -314,7 +332,7 @@ def _build_dashboard_lines(status, details, current_discovery):
     lines.append("")
     lines.append("  " + status_text)
     if details_text:
-        lines.append("     " + _truncate(details_text, columns - 6))
+        lines.append("     " + _truncate(details_text, columns - 2 - _DASH_DETAIL_INDENT))
     lines.append("")
     lines.append(f"  Текущая тема:    {doc_title}")
     lines.append(f"  Источник:        {doc_src}")
@@ -350,7 +368,7 @@ def _build_dashboard_lines(status, details, current_discovery):
                 sev = "err"
         color_fn = _RED if sev == "err" else _YELLOW
         lines.append(f"  Сервисы:  {color_fn()}{' / '.join(parts)}{_RESET()}")
-    lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - 14)}{_RESET()}")
+    lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - _DASH_GOAL_INDENT)}{_RESET()}")
     lines.append(f"  Управление:  {_DIM()}Q — выход{_RESET()}")
 
     return lines
@@ -918,7 +936,7 @@ def _maybe_run_synthesis(memory, discovery):
 def execute_session():
     global _LAST_SESSION_OK, _SYNTHESIS_DONE
     init_system()
-    invalidate_dashboard_cache()
+    invalidate_memory_cache()
 
     blank_discovery = {"title": "Чтение файла памяти...", "source": "Локальное ядро", "url": "-"}
     render_dashboard("ПРОБУЖДЕНИЕ", "Загрузка персистентных параметров", blank_discovery)
