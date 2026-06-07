@@ -23,7 +23,7 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
 
 ## Files
 
-- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MAX_WORLD_PICTURE_ENTRIES`, `MAX_LONG_TERM_KNOWLEDGE_ENTRIES`, `MAX_TITLE_LENGTH`, `MAX_EXTRACT_LENGTH`, `BAR_WIDTH`, `MAX_RECENT_QUERIES`, `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
+- `explorer_zen.py` — entire program. All prompts, dashboard text, and log strings are in Russian. Constants to tune live near the top: `AI_MODEL`, `LOOP_INTERVAL`, `API_TIMEOUT`, `WIKI_SEARCH_TIMEOUT`, `WIKI_SUMMARY_TIMEOUT`, `MAX_RETRIES`, `BASE_DELAY`, `MAX_SESSIONS` (None = infinite), `MAX_WORLD_PICTURE_ENTRIES`, `MAX_LONG_TERM_KNOWLEDGE_ENTRIES`, `MAX_TITLE_LENGTH`, `MAX_EXTRACT_LENGTH`, `BAR_WIDTH`, `MAX_RECENT_QUERIES`, `MEMORY_FILE`, `REPORTS_DIR`. Helper functions: `parse_llm_response`, `update_world_picture`, `write_session_report`, `synthesize_world_picture`, `write_synthesis_report`, `_world_picture_cap_reached`, `invalidate_dashboard_cache` (read the function before changing `execute_session`).
 - `explorer-zen.bat` — **removed**. Run `python explorer_zen.py` directly. (The old bat hardcoded the install path and an inline API key; both are gone.)
 - `memory.json` — persistent "world picture" and run state. Schema:
   - `character_name`, `biography` — used verbatim in the LLM system prompt.
@@ -34,8 +34,10 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
   - `wiki_fallback_count` — consecutive Wikipedia connection failures; reset to 0 on a successful real fetch. Bumped in `memory.json` on every failed session, visible in the dashboard. Not persisted on failure (resets on the next successful read).
   - `openrouter_fallback_count` — consecutive OpenRouter connection failures (only persisted on a successful session write). Visible in the dashboard together with `wiki_fallback_count`.
   - `recent_queries` — ring buffer of the last `MAX_RECENT_QUERIES` `next_query` values. Used by `_pick_next_query` to detect a loop: if the LLM suggests a topic already in `recent_queries`, it's replaced by a topic from `long_term_knowledge` (most recent first) or from `CYCLE_FALLBACK_TOPICS`.
+  - `synthesis_completed` — `False` until `_world_picture_cap_reached` triggers a final synthesis, then `True`. Persisted to `memory.json` and to `synthesis_path` (path to `reports/synthesis_*.md`).
   Editing `next_query` redirects the agent; editing the lists shapes its "memories".
 - `reports/report_YYYYMMDD_HHMMSS.md` — one Markdown file per session. Treated as output, not source.
+- `reports/synthesis_YYYYMMDD_HHMMSS.md` — one Markdown file with the final grand synthesis, written exactly once when any of the three `world_picture` lists reaches `MAX_WORLD_PICTURE_ENTRIES`. The main loop exits cleanly after this.
 - `memory.json.bak.YYYYMMDD_HHMMSS` — backup of a corrupted `memory.json` written by `init_system` before resetting to defaults. Not auto-cleaned.
 
 ## External services
@@ -45,6 +47,17 @@ There is none. Do not invent one. If you add deps, keep `urllib`/`json`/`os`/`ti
 - The free Gemma model is rate-limited and occasionally overloaded; long 429 pauses are normal, not a bug.
 - If Wikipedia returns nothing (network error, timeout, empty search), the session is **skipped**: nothing is written to `memory.json` or `reports/`, and `session_counter` is not incremented. The agent will retry the same `next_query` next session.
 - If OpenRouter returns an error (after exhausting `MAX_RETRIES`), the session is also **skipped** for the same reason.
+
+## Grand synthesis on cap
+
+When any of the three `world_picture` lists (`core_principles` / `unresolved_paradoxes` / `conceptual_links`) reaches `MAX_WORLD_PICTURE_ENTRIES` after a successful session, the agent:
+
+1. Calls `synthesize_world_picture(memory)` — sends the full `world_picture` + `long_term_knowledge` to the LLM with a structured 5-section prompt (`Общая картина` / `Главные законы` / `Главные парадоксы` / `Сквозные связи` / `Последнее слово Калипсо`).
+2. Writes the response to `reports/synthesis_<timestamp>.md` via `write_synthesis_report`.
+3. Sets `memory["synthesis_completed"] = True` and `memory["synthesis_path"] = <path>`, then saves `memory.json`.
+4. The main loop sees `_SYNTHESIS_DONE = True` and breaks cleanly with a `ФИНАЛЬНЫЙ ВЫХОД` dashboard frame.
+
+If the LLM synthesis call itself errors out (network / OpenRouter 429), the synthesis is skipped silently for that session; the loop continues. On the next successful session the cap is still reached, so synthesis is retried until it succeeds.
 
 ## LLM output contract
 

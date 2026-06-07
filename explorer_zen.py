@@ -25,8 +25,8 @@ WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари
 MAX_RETRIES = 3                   # Количество попыток запроса к ИИ при transient-ошибках
 BASE_DELAY = 15                   # Начальная пауза при перегрузке (в секундах)
 MAX_SESSIONS = None               # None = бесконечный цикл; целое число = остановиться после N сессий
-MAX_WORLD_PICTURE_ENTRIES = 999   # Кап на размер списков world_picture (законы/парадоксы/связи)
-MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 999  # Кап на размер списка long_term_knowledge (изученные темы)
+MAX_WORLD_PICTURE_ENTRIES = 99   # Кап на размер списков world_picture (законы/парадоксы/связи)
+MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 99  # Кап на размер списка long_term_knowledge (изученные темы)
 MAX_TITLE_LENGTH = 40            # Максимальная длина заголовка в дашборде (символов)
 MAX_EXTRACT_LENGTH = 40         # Максимальная длина текста (extract) в дашборде (символов)
 BAR_WIDTH = 20                  # Ширина прогресс-баров картины мира (в символах)
@@ -51,6 +51,7 @@ _DASHBOARD_CACHE_TTL = 1.0
 _OPENROUTER_STATE = {"status": "ok", "detail": ""}
 _WIKI_STATE = {"status": "ok", "detail": "", "consecutive_empty": 0}
 _LAST_SESSION_OK = True          # True, если предыдущая сессия дала результат; иначе сон короче
+_SYNTHESIS_DONE = False           # True, когда финальный синтез записан и главный цикл должен завершиться
 
 
 def _load_memory_cached():
@@ -397,7 +398,8 @@ def init_system():
         "long_term_knowledge": [],
         "wiki_fallback_count": 0,
         "openrouter_fallback_count": 0,
-        "recent_queries": []
+        "recent_queries": [],
+        "synthesis_completed": False
     }
 
     if not os.path.exists(MEMORY_FILE):
@@ -584,6 +586,92 @@ def update_world_picture(memory, parsed, topic_title):
     memory["long_term_knowledge"] = ltk[-MAX_LONG_TERM_KNOWLEDGE_ENTRIES:]
 
 
+def _world_picture_cap_reached(memory):
+    """True, если хотя бы один из трёх списков картины мира достиг MAX_WORLD_PICTURE_ENTRIES."""
+    wp = memory.get("world_picture", {})
+    return any(
+        len(wp.get(key, [])) >= MAX_WORLD_PICTURE_ENTRIES
+        for key in ("core_principles", "unresolved_paradoxes", "conceptual_links")
+    )
+
+
+def synthesize_world_picture(memory):
+    """Запрашивает у LLM финальный синтез всей накопленной картины мира. Возвращает markdown-текст."""
+    wp = memory.get("world_picture", {})
+    principles = wp.get("core_principles", [])
+    paradoxes = wp.get("unresolved_paradoxes", [])
+    links = wp.get("conceptual_links", [])
+    ltk = memory.get("long_term_knowledge", [])
+
+    synthesis_blank = {
+        "title": "Финальный синтез",
+        "source": "LLM grand synthesis",
+        "url": "-",
+        "extract": f"Синтез {len(principles)} законов, {len(paradoxes)} парадоксов, {len(links)} связей."
+    }
+    render_dashboard("ФИНАЛЬНЫЙ СИНТЕЗ", "Формирование всеобъемлющего обобщения картины мира", synthesis_blank)
+
+    system_instruction = (
+        f"Ты — {memory.get('character_name', 'Калипсо')}. {memory.get('biography', '')}\n"
+        f"Ты провела {memory.get('session_counter', 0)} сессий исследования и достигла предела "
+        f"накопленных знаний. Сейчас ты завершаешь путь и оставляешь последнее слово — "
+        f"свой финальный синтез всего, что узнала."
+    )
+
+    user_prompt = (
+        f"Вот твоя полная картина мира на момент завершения пути:\n\n"
+        f"### Изученные темы ({len(ltk)}):\n"
+        + "\n".join(f"- {t}" for t in ltk) +
+        f"\n\n### Законы вселенной ({len(principles)}):\n"
+        + "\n".join(f"- {p}" for p in principles) +
+        f"\n\n### Неразрешённые парадоксы ({len(paradoxes)}):\n"
+        + "\n".join(f"- {p}" for p in paradoxes) +
+        f"\n\n### Сеть связей ({len(links)}):\n"
+        + "\n".join(f"- {l}" for l in links) +
+        f"\n\nСделай финальный синтез — связный, осмысленный, от первого лица. "
+        f"Охвати главные закономерности, глубинные противоречия и самое важное, что ты вынесла из пути. "
+        f"Говори как Калипсо — с её характером и голосом.\n\n"
+        f"ОФОРМИ ОТВЕТ СТРОГО ПО ШАБЛОНУ (маркеры '##'):\n\n"
+        f"## Общая картина\n"
+        f"(1-2 абзаца: мир в целом, как ты его теперь видишь.)\n\n"
+        f"## Главные законы\n"
+        f"(3-5 тезисов: что осталось самым фундаментальным.)\n\n"
+        f"## Главные парадоксы\n"
+        f"(3-5 тезисов: что так и осталось неразрешённым или противоречивым.)\n\n"
+        f"## Сквозные связи\n"
+        f"(3-5 тезисов: какие неожиданные мосты между разными темами ты обнаружила.)\n\n"
+        f"## Последнее слово Калипсо\n"
+        f"(1 абзац: прощальная рефлексия — что этот путь значил для тебя, что осталось за кадром.)"
+    )
+
+    return ask_openrouter_agent(system_instruction, user_prompt, synthesis_blank)
+
+
+def write_synthesis_report(memory, synthesis_text):
+    """Записывает финальный синтез в reports/synthesis_<ts>.md. Возвращает путь."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = os.path.join(REPORTS_DIR, f"synthesis_{timestamp}.md")
+
+    wp = memory.get("world_picture", {})
+    ltk = memory.get("long_term_knowledge", [])
+
+    report_content = (
+        f"# Финальный Синтез Калипсо\n"
+        f"**Время:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"**Сессий проведено:** {memory.get('session_counter', 0)}\n"
+        f"**Изучено тем:** {len(ltk)}\n"
+        f"**Законов в картине мира:** {len(wp.get('core_principles', []))} / {MAX_WORLD_PICTURE_ENTRIES}\n"
+        f"**Парадоксов:** {len(wp.get('unresolved_paradoxes', []))} / {MAX_WORLD_PICTURE_ENTRIES}\n"
+        f"**Связей:** {len(wp.get('conceptual_links', []))} / {MAX_WORLD_PICTURE_ENTRIES}\n\n"
+        f"---\n\n"
+        f"{synthesis_text}\n"
+    )
+
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(report_content)
+    return report_path
+
+
 def write_session_report(discovery, memory, parsed):
     """Записывает Markdown-отчёт сессии на диск. Возвращает путь."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -716,6 +804,29 @@ def execute_session():
         json.dump(memory, f, ensure_ascii=False, indent=4)
     invalidate_dashboard_cache()
 
+    if not memory.get("synthesis_completed", False) and _world_picture_cap_reached(memory):
+        synthesis_text = synthesize_world_picture(memory)
+        if "ERROR_REASON" not in synthesis_text:
+            synthesis_path = write_synthesis_report(memory, synthesis_text)
+            memory["synthesis_completed"] = True
+            memory["synthesis_path"] = synthesis_path
+            with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(memory, f, ensure_ascii=False, indent=4)
+            invalidate_dashboard_cache()
+            global _SYNTHESIS_DONE
+            _SYNTHESIS_DONE = True
+            render_dashboard(
+                "СИНТЕЗ ЗАВЕРШЁН",
+                f"Кап картины мира достигнут. Финальное обобщение: {synthesis_path}",
+                discovery
+            )
+        else:
+            render_dashboard(
+                "СИНТЕЗ НЕ УДАЛСЯ",
+                "Финальный синтез пропущен из-за сбоя сети. Цикл продолжится.",
+                discovery
+            )
+
     render_dashboard("КОМПИЛЯЦИЯ ОТЧЕТА", "Запись Markdown-документа на накопитель", discovery)
     write_session_report(discovery, memory, parsed)
 
@@ -743,6 +854,13 @@ def main():
             start_time = time.time()
             execute_session()
             sessions_done += 1
+
+            if _SYNTHESIS_DONE:
+                render_dashboard(
+                    "ФИНАЛЬНЫЙ ВЫХОД",
+                    f"Картина мира заполнена до капа. Синтез записан. Всего сессий: {sessions_done}."
+                )
+                break
 
             if MAX_SESSIONS is not None and sessions_done >= MAX_SESSIONS:
                 render_dashboard(

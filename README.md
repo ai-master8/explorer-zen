@@ -11,6 +11,7 @@ Each session ends with a Markdown report in `reports/`. The agent's state lives 
 - 🔁 **Infinite research loop** — configurable pause between sessions; exit at any time with `Q` (no Enter required) or set a hard limit with `MAX_SESSIONS`.
 - 🧠 **Cumulative memory** — capped lists of laws, paradoxes, conceptual links, and studied topics persist across sessions.
 - 📝 **Markdown reports** — one file per session with the agent's reflections, source material, and world-picture evolution.
+- 🎬 **Grand synthesis on cap** — when any of the three memory lists reaches `MAX_WORLD_PICTURE_ENTRIES`, the agent produces a final structured synthesis of everything it learned (laws, paradoxes, cross-cutting links, and a closing monologue from Калипсо) and writes it to `reports/synthesis_<timestamp>.md`. The main loop then exits cleanly.
 - 🛡 **Resilient to failures** — retries 429/5xx/network errors from OpenRouter, skips the session on persistent Wikipedia or OpenRouter failures (nothing is written to memory or reports; the session counter is not incremented).
 - 📦 **Python standard library only** — no third-party dependencies.
 
@@ -141,6 +142,8 @@ All knobs live at the top of `explorer_zen.py`, in the "ГЛОБАЛЬНАЯ К�
 
 The LLM receives a system prompt with the already-accumulated world picture and is asked to strictly follow a template of five `##`-sections. The parser splits the response and appends new entities to `memory.json`.
 
+When any of the three `world_picture` lists (`core_principles` / `unresolved_paradoxes` / `conceptual_links`) reaches `MAX_WORLD_PICTURE_ENTRIES`, a one-shot final synthesis is requested: the full world picture + `long_term_knowledge` is sent to the LLM with a different structured prompt (`Общая картина` / `Главные законы` / `Главные парадоксы` / `Сквозные связи` / `Последнее слово Калипсо`). The response is written to `reports/synthesis_<timestamp>.md`, `memory.json` is marked `synthesis_completed: true`, and the main loop exits cleanly with a `ФИНАЛЬНЫЙ ВЫХОД` dashboard frame.
+
 ## Files
 
 ```
@@ -148,7 +151,8 @@ explorer-zen/
 ├── explorer_zen.py         # the whole program
 ├── memory.json             # world picture + session counter (created on first run)
 ├── reports/                # Markdown reports per session
-│   └── report_YYYYMMDD_HHMMSS.md
+│   ├── report_YYYYMMDD_HHMMSS.md
+│   └── synthesis_YYYYMMDD_HHMMSS.md   # final grand synthesis (written once on cap)
 ├── AGENTS.md               # instructions for AI agents (English)
 ├── DEPLOY.md               # VPS deployment guide (Ubuntu + tmux + systemd)
 ├── README.md               # this file
