@@ -15,18 +15,19 @@ from datetime import datetime
 # ====================================================================
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
-AI_MODEL = "google/gemma-4-31b-it:free"
+# AI_MODEL = "google/gemma-4-31b-it:free"
+AI_MODEL = "deepseek/deepseek-v4-flash"
 
-LOOP_INTERVAL = 180               # Интервал сна после успешной сессии (в секундах)
-LOOP_INTERVAL_FAILURE = 30       # Интервал сна после пропущенной/провальной сессии
+LOOP_INTERVAL = 20               # Интервал сна после успешной сессии (в секундах)
+LOOP_INTERVAL_FAILURE = 10       # Интервал сна после пропущенной/провальной сессии
 API_TIMEOUT = 60                  # Время ожидания ответа от OpenRouter (в секундах)
 WIKI_SEARCH_TIMEOUT = 8           # Таймаут поискового запроса к Википедии (в секундах)
 WIKI_SUMMARY_TIMEOUT = 12         # Таймаут запроса саммари статьи (в секундах)
 MAX_RETRIES = 3                   # Количество попыток запроса к ИИ при transient-ошибках
 BASE_DELAY = 15                   # Начальная пауза при перегрузке (в секундах)
 MAX_SESSIONS = None               # None = бесконечный цикл; целое число = остановиться после N сессий
-MAX_WORLD_PICTURE_ENTRIES = 99   # Кап на размер списков world_picture (законы/парадоксы/связи)
-MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 99  # Кап на размер списка long_term_knowledge (изученные темы)
+MAX_WORLD_PICTURE_ENTRIES = 50   # Кап на размер списков world_picture (законы/парадоксы/связи)
+MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка long_term_knowledge (изученные темы)
 MAX_TITLE_LENGTH = 40            # Максимальная длина заголовка в дашборде (символов)
 MAX_EXTRACT_LENGTH = 40         # Максимальная длина текста (extract) в дашборде (символов)
 BAR_WIDTH = 20                  # Ширина прогресс-баров картины мира (в символах)
@@ -73,15 +74,16 @@ def invalidate_dashboard_cache():
     _DASHBOARD_CACHE["data"] = None
     _DASHBOARD_CACHE["loaded_at"] = 0.0
 
-def _set_or_state(status, detail=""):
-    """Обновляет module-level состояние OpenRouter для отображения в дашборде."""
-    _OPENROUTER_STATE["status"] = status
-    _OPENROUTER_STATE["detail"] = detail
+def save_memory(memory):
+    """Записывает memory.json на диск и сбрасывает кэш дашборда."""
+    with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(memory, f, ensure_ascii=False, indent=4)
+    invalidate_dashboard_cache()
 
-def _set_wiki_state(status, detail=""):
-    """Обновляет module-level состояние Wikipedia для отображения в дашборде."""
-    _WIKI_STATE["status"] = status
-    _WIKI_STATE["detail"] = detail
+def _set_service_state(state, status, detail=""):
+    """Обновляет module-level состояние сервиса (OpenRouter / Wikipedia) для дашборда."""
+    state["status"] = status
+    state["detail"] = detail
 
 
 _USE_ANSI = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
@@ -373,12 +375,9 @@ def render_dashboard(status, details, current_discovery=None):
     _LAST_LINES = lines
     _LAST_TERMINAL_SIZE = current_size
 
-def init_system():
-    """Инициализация расширенной структуры семантической памяти (Картины Мира)."""
-    if not os.path.exists(REPORTS_DIR):
-        os.makedirs(REPORTS_DIR)
-
-    default_memory = {
+def _default_memory():
+    """Возвращает дефолтную схему памяти для нового memory.json или миграции старого."""
+    return {
         "character_name": "Калипсо",
         "biography": "Автономный ИИ-исследователь цифрового пространства. Любопытна, немного меланхолична.",
         "session_counter": 0,
@@ -402,41 +401,52 @@ def init_system():
         "synthesis_completed": False
     }
 
-    if not os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(default_memory, f, ensure_ascii=False, indent=4)
-        return
 
+def _repair_memory_if_corrupt():
+    """Загружает memory.json; если файл отсутствует или повреждён, создаёт дефолтный. Возвращает dict."""
+    if not os.path.exists(MEMORY_FILE):
+        memory = _default_memory()
+        save_memory(memory)
+        return memory
     try:
         with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
-            current_memory = json.load(f)
+            return json.load(f)
     except Exception:
         backup_path = f"{MEMORY_FILE}.bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
             os.replace(MEMORY_FILE, backup_path)
         except OSError:
             pass
-        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(default_memory, f, ensure_ascii=False, indent=4)
-        return
+        memory = _default_memory()
+        save_memory(memory)
+        return memory
 
+
+def _migrate_memory(memory):
+    """Добавляет в memory недостающие ключи из _default_memory. Сохраняет файл, если были изменения."""
+    default = _default_memory()
     updated = False
-    if "world_picture" not in current_memory:
-        current_memory["world_picture"] = default_memory["world_picture"]
+    if "world_picture" not in memory:
+        memory["world_picture"] = default["world_picture"]
         updated = True
-
-    for key, default_value in default_memory.items():
-        if key not in current_memory:
-            current_memory[key] = default_value
+    for key, default_value in default.items():
+        if key not in memory:
+            memory[key] = default_value
             updated = True
-
     if updated:
-        with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(current_memory, f, ensure_ascii=False, indent=4)
+        save_memory(memory)
+
+
+def init_system():
+    """Инициализация расширенной структуры семантической памяти (Картины Мира)."""
+    if not os.path.exists(REPORTS_DIR):
+        os.makedirs(REPORTS_DIR)
+    memory = _repair_memory_if_corrupt()
+    _migrate_memory(memory)
 
 def search_wikipedia(query, discovery_context):
     """Полнотекстовый поиск в Википедии с извлечением саммари и обновлением UI."""
-    _set_wiki_state("ok", "")
+    _set_service_state(_WIKI_STATE, "ok", "")
     render_dashboard("ПОИСК ДАННЫХ", f"Запуск индексации по теме '{query}'", discovery_context)
     encoded_query = urllib.parse.quote(query.strip())
     search_url = f"https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={encoded_query}&format=json&srlimit=1"
@@ -448,7 +458,7 @@ def search_wikipedia(query, discovery_context):
 
             if not search_results:
                 _WIKI_STATE["consecutive_empty"] += 1
-                _set_wiki_state("transient", f"пустой поиск: '{query}'")
+                _set_service_state(_WIKI_STATE, "transient", f"пустой поиск: '{query}'")
                 return None
 
             actual_title = search_results[0]["title"]
@@ -467,12 +477,12 @@ def search_wikipedia(query, discovery_context):
             }
     except Exception as e:
         _WIKI_STATE["consecutive_empty"] += 1
-        _set_wiki_state("transient", f"{type(e).__name__}")
+        _set_service_state(_WIKI_STATE, "transient", f"{type(e).__name__}")
         return None
 
 def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
     """Связывается с OpenRouter (gemma-4-31b-it:free): ретраит transient-ошибки, рисует шаги на дашборде."""
-    _set_or_state("ok", "")
+    _set_service_state(_OPENROUTER_STATE, "ok", "")
     payload = {
         "model": AI_MODEL,
         "messages": [
@@ -499,27 +509,27 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
             )
             with urllib.request.urlopen(req, timeout=API_TIMEOUT) as response:
                 res_data = json.loads(response.read().decode('utf-8'))
-                _set_or_state("ok", "")
+                _set_service_state(_OPENROUTER_STATE, "ok", "")
                 return res_data["choices"][0]["message"]["content"].strip()
         except urllib.error.HTTPError as e:
             if e.code == 429 or e.code == 408 or e.code >= 500:
-                _set_or_state("transient", f"{e.code} (попытка {attempt+1}/{MAX_RETRIES})")
+                _set_service_state(_OPENROUTER_STATE, "transient", f"{e.code} (попытка {attempt+1}/{MAX_RETRIES})")
                 render_dashboard("СЕТЕВАЯ ПАУЗА", f"Код ответа {e.code}. Ожидание {current_delay} сек...", discovery_context)
                 time.sleep(current_delay)
                 current_delay *= 2
                 continue
-            _set_or_state("error", f"код {e.code}")
+            _set_service_state(_OPENROUTER_STATE, "error", f"код {e.code}")
             return f"ERROR_REASON: Код ошибки {e.code}"
         except (urllib.error.URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, IndexError) as e:
-            _set_or_state("transient", f"{type(e).__name__} (попытка {attempt+1}/{MAX_RETRIES})")
+            _set_service_state(_OPENROUTER_STATE, "transient", f"{type(e).__name__} (попытка {attempt+1}/{MAX_RETRIES})")
             render_dashboard("СЕТЕВАЯ ПАУЗА", f"Временный сбой ({type(e).__name__}). Ожидание {current_delay} сек...", discovery_context)
             time.sleep(current_delay)
             current_delay *= 2
             continue
         except Exception as e:
-            _set_or_state("error", f"неизвестная: {e}")
+            _set_service_state(_OPENROUTER_STATE, "error", f"неизвестная: {e}")
             return f"ERROR_REASON: Неизвестная ошибка: {e}"
-    _set_or_state("error", f"исчерпано {MAX_RETRIES} попыток")
+    _set_service_state(_OPENROUTER_STATE, "error", f"исчерпано {MAX_RETRIES} попыток")
     return "ERROR_REASON: Не удалось связаться с API после серии попыток."
 
 def extract_section(text, current_header, next_header):
@@ -601,7 +611,6 @@ def synthesize_world_picture(memory):
     principles = wp.get("core_principles", [])
     paradoxes = wp.get("unresolved_paradoxes", [])
     links = wp.get("conceptual_links", [])
-    ltk = memory.get("long_term_knowledge", [])
 
     synthesis_blank = {
         "title": "Финальный синтез",
@@ -610,6 +619,18 @@ def synthesize_world_picture(memory):
         "extract": f"Синтез {len(principles)} законов, {len(paradoxes)} парадоксов, {len(links)} связей."
     }
     render_dashboard("ФИНАЛЬНЫЙ СИНТЕЗ", "Формирование всеобъемлющего обобщения картины мира", synthesis_blank)
+
+    system_instruction, user_prompt = build_synthesis_prompt(memory)
+    return ask_openrouter_agent(system_instruction, user_prompt, synthesis_blank)
+
+
+def build_synthesis_prompt(memory):
+    """Строит system+user инструкции для финального синтеза картины мира. Возвращает (system, user)."""
+    wp = memory.get("world_picture", {})
+    principles = wp.get("core_principles", [])
+    paradoxes = wp.get("unresolved_paradoxes", [])
+    links = wp.get("conceptual_links", [])
+    ltk = memory.get("long_term_knowledge", [])
 
     system_instruction = (
         f"Ты — {memory.get('character_name', 'Калипсо')}. {memory.get('biography', '')}\n"
@@ -643,8 +664,7 @@ def synthesize_world_picture(memory):
         f"## Последнее слово Калипсо\n"
         f"(1 абзац: прощальная рефлексия — что этот путь значил для тебя, что осталось за кадром.)"
     )
-
-    return ask_openrouter_agent(system_instruction, user_prompt, synthesis_blank)
+    return system_instruction, user_prompt
 
 
 def write_synthesis_report(memory, synthesis_text):
@@ -705,59 +725,9 @@ def write_session_report(discovery, memory, parsed):
     return report_path
 
 
-def execute_session():
-    global _LAST_SESSION_OK
-    init_system()
-    invalidate_dashboard_cache()
-
-    blank_discovery = {"title": "Чтение файла памяти...", "source": "Локальное ядро", "url": "-"}
-    render_dashboard("ПРОБУЖДЕНИЕ", "Загрузка персистентных параметров", blank_discovery)
-
-    with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
-        memory = json.load(f)
-
-    target_query = memory.get("next_query", "Квантовая физика")
+def build_session_prompt(memory, discovery):
+    """Строит system+user инструкции для обычной (не финальной) сессии. Возвращает (system, user)."""
     wp = memory.get("world_picture", {})
-
-    discovery = search_wikipedia(target_query, blank_discovery)
-
-    if not discovery:
-        memory["wiki_fallback_count"] = memory.get("wiki_fallback_count", 0) + 1
-        rotated = ""
-        if _WIKI_STATE["consecutive_empty"] >= WIKI_EMPTY_ROTATE_AT:
-            recent = memory.setdefault("recent_queries", [])
-            new_next = target_query
-            for candidate in reversed(memory.get("long_term_knowledge", [])):
-                if candidate not in recent:
-                    new_next = candidate
-                    break
-            else:
-                for fallback in CYCLE_FALLBACK_TOPICS:
-                    if fallback not in recent:
-                        new_next = fallback
-                        break
-            if new_next != target_query:
-                memory["next_query"] = new_next
-                recent.insert(0, new_next)
-                del recent[MAX_RECENT_QUERIES:]
-                rotated = f" Ротация next_query → {new_next!r}."
-                with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(memory, f, ensure_ascii=False, indent=4)
-                invalidate_dashboard_cache()
-        render_dashboard(
-            "СБОЙ КАНАЛА ДАННЫХ",
-            f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Сессия пропущена.{rotated}",
-            blank_discovery
-        )
-        _LAST_SESSION_OK = False
-        return
-
-    memory["wiki_fallback_count"] = 0
-    memory["openrouter_fallback_count"] = 0
-    _set_wiki_state("ok", "")
-
-    render_dashboard("АНАЛИЗ СТРУКТУРЫ", "Сопоставление полученного абстракта с картиной мира", discovery)
-
     system_instruction = (
         f"Ты — мыслящий ИИ-персонаж по имени {memory['character_name']}. Характер: {memory['biography']}\n\n"
         f"ТВОЯ ТЕКУЩАЯ КАРТИНА МИРА В ДОЛГОВРЕМЕННОЙ ПАМЯТИ:\n"
@@ -779,9 +749,98 @@ def execute_session():
         f"## Следующая цель исследования\n"
         f"(Одно слово или фраза для поиска информации в следующей сессии.)"
     )
+    user_prompt = (
+        f"Новые данные:\n"
+        f"Источник: {discovery['source']}\n"
+        f"Документ: {discovery['title']}\n"
+        f"Содержание: {discovery['extract']}"
+    )
+    return system_instruction, user_prompt
 
-    user_prompt = f"Новые данные:\nИсточник: {discovery['source']}\nДокумент: {discovery['title']}\nСодержание: {discovery['extract']}"
 
+def _maybe_rotate_next_query(memory, target_query):
+    """Если слишком много пустых Wiki-поисков подряд, меняет next_query. Возвращает сообщение о ротации или ''."""
+    if _WIKI_STATE["consecutive_empty"] < WIKI_EMPTY_ROTATE_AT:
+        return ""
+    recent = memory.setdefault("recent_queries", [])
+    new_next = target_query
+    for candidate in reversed(memory.get("long_term_knowledge", [])):
+        if candidate not in recent:
+            new_next = candidate
+            break
+    else:
+        for fallback in CYCLE_FALLBACK_TOPICS:
+            if fallback not in recent:
+                new_next = fallback
+                break
+    if new_next == target_query:
+        return ""
+    memory["next_query"] = new_next
+    recent.insert(0, new_next)
+    del recent[MAX_RECENT_QUERIES:]
+    save_memory(memory)
+    return f" Ротация next_query → {new_next!r}."
+
+
+def _maybe_run_synthesis(memory, discovery):
+    """Если кап достигнут и синтез ещё не сделан, запускает его. Возвращает True, если синтез записан."""
+    if memory.get("synthesis_completed", False):
+        return False
+    if not _world_picture_cap_reached(memory):
+        return False
+    synthesis_text = synthesize_world_picture(memory)
+    if "ERROR_REASON" in synthesis_text:
+        render_dashboard(
+            "СИНТЕЗ НЕ УДАЛСЯ",
+            "Финальный синтез пропущен из-за сбоя сети. Цикл продолжится.",
+            discovery
+        )
+        return False
+    synthesis_path = write_synthesis_report(memory, synthesis_text)
+    memory["synthesis_completed"] = True
+    memory["synthesis_path"] = synthesis_path
+    save_memory(memory)
+    render_dashboard(
+        "СИНТЕЗ ЗАВЕРШЁН",
+        f"Кап картины мира достигнут. Финальное обобщение: {synthesis_path}",
+        discovery
+    )
+    return True
+
+
+def execute_session():
+    global _LAST_SESSION_OK, _SYNTHESIS_DONE
+    init_system()
+    invalidate_dashboard_cache()
+
+    blank_discovery = {"title": "Чтение файла памяти...", "source": "Локальное ядро", "url": "-"}
+    render_dashboard("ПРОБУЖДЕНИЕ", "Загрузка персистентных параметров", blank_discovery)
+
+    with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
+        memory = json.load(f)
+
+    target_query = memory.get("next_query", "Квантовая физика")
+
+    discovery = search_wikipedia(target_query, blank_discovery)
+
+    if not discovery:
+        memory["wiki_fallback_count"] = memory.get("wiki_fallback_count", 0) + 1
+        rotated_msg = _maybe_rotate_next_query(memory, target_query)
+        _LAST_SESSION_OK = False
+        render_dashboard(
+            "СБОЙ КАНАЛА ДАННЫХ",
+            f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Сессия пропущена.{rotated_msg}",
+            blank_discovery
+        )
+        return
+
+    memory["wiki_fallback_count"] = 0
+    memory["openrouter_fallback_count"] = 0
+    _set_service_state(_WIKI_STATE, "ok", "")
+
+    render_dashboard("АНАЛИЗ СТРУКТУРЫ", "Сопоставление полученного абстракта с картиной мира", discovery)
+
+    system_instruction, user_prompt = build_session_prompt(memory, discovery)
     raw_response = ask_openrouter_agent(system_instruction, user_prompt, discovery)
     if "ERROR_REASON" in raw_response:
         memory["openrouter_fallback_count"] = memory.get("openrouter_fallback_count", 0) + 1
@@ -796,36 +855,12 @@ def execute_session():
     memory["session_counter"] = memory.get("session_counter", 0) + 1
 
     render_dashboard("ПАРСИНГ ОТВЕТА", "Интеграция новых сущностей в семантические слои памяти", discovery)
-
     parsed = parse_llm_response(raw_response)
     update_world_picture(memory, parsed, discovery['title'])
+    save_memory(memory)
 
-    with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(memory, f, ensure_ascii=False, indent=4)
-    invalidate_dashboard_cache()
-
-    if not memory.get("synthesis_completed", False) and _world_picture_cap_reached(memory):
-        synthesis_text = synthesize_world_picture(memory)
-        if "ERROR_REASON" not in synthesis_text:
-            synthesis_path = write_synthesis_report(memory, synthesis_text)
-            memory["synthesis_completed"] = True
-            memory["synthesis_path"] = synthesis_path
-            with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
-                json.dump(memory, f, ensure_ascii=False, indent=4)
-            invalidate_dashboard_cache()
-            global _SYNTHESIS_DONE
-            _SYNTHESIS_DONE = True
-            render_dashboard(
-                "СИНТЕЗ ЗАВЕРШЁН",
-                f"Кап картины мира достигнут. Финальное обобщение: {synthesis_path}",
-                discovery
-            )
-        else:
-            render_dashboard(
-                "СИНТЕЗ НЕ УДАЛСЯ",
-                "Финальный синтез пропущен из-за сбоя сети. Цикл продолжится.",
-                discovery
-            )
+    if _maybe_run_synthesis(memory, discovery):
+        _SYNTHESIS_DONE = True
 
     render_dashboard("КОМПИЛЯЦИЯ ОТЧЕТА", "Запись Markdown-документа на накопитель", discovery)
     write_session_report(discovery, memory, parsed)
