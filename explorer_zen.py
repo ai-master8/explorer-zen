@@ -44,6 +44,16 @@ CYCLE_FALLBACK_TOPICS = (        # Запасные темы на случай �
 
 MEMORY_FILE = "memory.json"
 REPORTS_DIR = "reports"
+WIKI_USER_AGENT = 'AI-Researcher-Agent/3.0 (https://localhost; contact: maintainer)'
+OPENROUTER_REFERER = "https://localhost:3000"
+OPENROUTER_APP_TITLE = "Cognitive AI Researcher"
+AI_TEMPERATURE = 1.0
+WIKI_SEARCH_LIMIT = 1
+DEDUP_WINDOW_SIZE = 30
+PROMPT_RECENT_TOPICS_COUNT = 10
+_ERROR_SENTINEL = "ERROR_REASON"
+_TRANSIENT_ERRORS = (urllib.error.URLError, TimeoutError, socket.timeout,
+                     json.JSONDecodeError, KeyError, IndexError)
 # ====================================================================
 
 def get_now():
@@ -102,6 +112,60 @@ def _mark_failure(status_text, details, discovery):
     global _LAST_SESSION_OK
     _LAST_SESSION_OK = False
     render_dashboard(status_text, details, discovery)
+
+
+def _build_messages(system, user):
+    """Собирает список сообщений для OpenRouter payload."""
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def _push_recent_query(memory, topic):
+    """Добавляет topic в начало recent_queries (с капом MAX_RECENT_QUERIES)."""
+    recent = memory.setdefault("recent_queries", [])
+    recent.insert(0, topic)
+    del recent[MAX_RECENT_QUERIES:]
+
+
+def _unpack_world_picture(memory):
+    """Извлекает (wp_dict, principles_list, paradoxes_list, links_list) из memory."""
+    wp = memory.get("world_picture", {})
+    return (
+        wp,
+        wp.get("core_principles", []),
+        wp.get("unresolved_paradoxes", []),
+        wp.get("conceptual_links", []),
+    )
+
+
+def _find_fallback_topic(memory, recent_queries):
+    """Ищет тему из long_term_knowledge (с конца) или CYCLE_FALLBACK_TOPICS,
+    не присутствующую в recent_queries. Возвращает найденную тему или None."""
+    for candidate in reversed(memory.get("long_term_knowledge", [])):
+        if candidate not in recent_queries:
+            return candidate
+    for fallback in CYCLE_FALLBACK_TOPICS:
+        if fallback not in recent_queries:
+            return fallback
+    return None
+
+
+def _extend_and_cap_list(wp, key, new_items, cap):
+    """Добавляет new_items к wp[key] и обрезает список до cap."""
+    lst = wp.setdefault(key, [])
+    if new_items:
+        lst.extend(new_items)
+    wp[key] = lst[-cap:]
+
+
+def _append_ltk(memory, topic_title):
+    """Добавляет тему в long_term_knowledge (без дубликатов, с капом)."""
+    ltk = memory.setdefault("long_term_knowledge", [])
+    if topic_title not in ltk:
+        ltk.append(topic_title)
+    memory["long_term_knowledge"] = ltk[-MAX_LONG_TERM_KNOWLEDGE_ENTRIES:]
 
 
 _USE_ANSI = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
@@ -225,17 +289,10 @@ def _pick_next_query(memory, proposed):
     cycle_detected = proposed in recent
     final = proposed
     if cycle_detected:
-        for candidate in reversed(memory.get("long_term_knowledge", [])):
-            if candidate not in recent:
-                final = candidate
-                break
-        else:
-            for fallback in CYCLE_FALLBACK_TOPICS:
-                if fallback not in recent:
-                    final = fallback
-                    break
-    recent.insert(0, final)
-    del recent[MAX_RECENT_QUERIES:]
+        fb = _find_fallback_topic(memory, recent)
+        if fb:
+            final = fb
+    _push_recent_query(memory, final)
     return final, cycle_detected
 
 def _truncate(s, width):
@@ -547,9 +604,9 @@ def search_wikipedia(query, discovery_context):
     _set_service_state(_WIKI_STATE, "ok", "")
     render_dashboard("ПОИСК ДАННЫХ", f"Запуск индексации по теме '{query}'", discovery_context)
     encoded_query = urllib.parse.quote(query.strip())
-    search_url = f"https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={encoded_query}&format=json&srlimit=1"
+    search_url = f"https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch={encoded_query}&format=json&srlimit={WIKI_SEARCH_LIMIT}"
     try:
-        req = urllib.request.Request(search_url, headers={'User-Agent': 'AI-Researcher-Agent/3.0 (https://localhost; contact: maintainer)'})
+        req = urllib.request.Request(search_url, headers={'User-Agent': WIKI_USER_AGENT})
         with urllib.request.urlopen(req, timeout=WIKI_SEARCH_TIMEOUT) as response:
             search_data = json.loads(response.read().decode('utf-8'))
             search_results = search_data.get("query", {}).get("search", [])
@@ -568,7 +625,7 @@ def search_wikipedia(query, discovery_context):
             f"&titles={encoded_title}&format=json"
         )
 
-        with urllib.request.urlopen(urllib.request.Request(summary_url, headers={'User-Agent': 'AI-Researcher-Agent/3.0 (https://localhost; contact: maintainer)'}), timeout=WIKI_SUMMARY_TIMEOUT) as res:
+        with urllib.request.urlopen(urllib.request.Request(summary_url, headers={'User-Agent': WIKI_USER_AGENT}), timeout=WIKI_SUMMARY_TIMEOUT) as res:
             data = json.loads(res.read().decode('utf-8'))
             pages = data.get("query", {}).get("pages", {})
             page = next(iter(pages.values())) if pages else {}
@@ -593,11 +650,8 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
     _set_service_state(_OPENROUTER_STATE, "ok", "")
     payload = {
         "model": AI_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 1.0,
+        "messages": _build_messages(system_prompt, user_prompt),
+        "temperature": AI_TEMPERATURE,
         "reasoning": {
             "effort": REASONING_EFFORT
         }
@@ -614,8 +668,8 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
                 headers={
                     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://localhost:3000",
-                    "X-Title": "Cognitive AI Researcher"
+                    "HTTP-Referer": OPENROUTER_REFERER,
+                    "X-Title": OPENROUTER_APP_TITLE,
                 }
             )
             with urllib.request.urlopen(req, timeout=API_TIMEOUT) as response:
@@ -630,8 +684,8 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
                 current_delay *= 2
                 continue
             _set_service_state(_OPENROUTER_STATE, "error", f"код {e.code}")
-            return f"ERROR_REASON: Код ошибки {e.code}"
-        except (urllib.error.URLError, TimeoutError, socket.timeout, json.JSONDecodeError, KeyError, IndexError) as e:
+            return f"{_ERROR_SENTINEL}: Код ошибки {e.code}"
+        except _TRANSIENT_ERRORS as e:
             _set_service_state(_OPENROUTER_STATE, "transient", f"{type(e).__name__} (попытка {attempt+1}/{MAX_RETRIES})")
             render_dashboard("СЕТЕВАЯ ПАУЗА", f"Временный сбой ({type(e).__name__}). Ожидание {current_delay} сек...", discovery_context)
             time.sleep(current_delay)
@@ -639,9 +693,9 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
             continue
         except Exception as e:
             _set_service_state(_OPENROUTER_STATE, "error", f"неизвестная: {e}")
-            return f"ERROR_REASON: Неизвестная ошибка: {e}"
+            return f"{_ERROR_SENTINEL}: Неизвестная ошибка: {e}"
     _set_service_state(_OPENROUTER_STATE, "error", f"исчерпано {MAX_RETRIES} попыток")
-    return "ERROR_REASON: Не удалось связаться с API после серии попыток."
+    return f"{_ERROR_SENTINEL}: Не удалось связаться с API после серии попыток."
 
 def extract_section(text, current_header, next_header):
     """Вспомогательный безопасный парсер блоков текста."""
@@ -725,7 +779,7 @@ def _is_duplicate(new_item, existing_items, threshold=0.85):
     norm_new = re.sub(r'[^\w\s]', '', new_item.lower()).strip()
     if not norm_new:
         return False
-    for ex in existing_items[-30:]:
+    for ex in existing_items[-DEDUP_WINDOW_SIZE:]:
         norm_ex = re.sub(r'[^\w\s]', '', ex.lower()).strip()
         if not norm_ex:
             continue
@@ -742,23 +796,15 @@ def update_world_picture(memory, parsed, topic_title):
     new_px = [x for x in parsed["new_px"] if not _is_duplicate(x, wp.get("unresolved_paradoxes", []))]
     new_l = [x for x in parsed["new_l"] if not _is_duplicate(x, wp.get("conceptual_links", []))]
 
-    if new_p: wp.setdefault("core_principles", []).extend(new_p)
-    if new_px: wp.setdefault("unresolved_paradoxes", []).extend(new_px)
-    if new_l: wp.setdefault("conceptual_links", []).extend(new_l)
-
-    wp["core_principles"] = wp.get("core_principles", [])[-MAX_WORLD_PICTURE_ENTRIES:]
-    wp["unresolved_paradoxes"] = wp.get("unresolved_paradoxes", [])[-MAX_WORLD_PICTURE_ENTRIES:]
-    wp["conceptual_links"] = wp.get("conceptual_links", [])[-MAX_WORLD_PICTURE_ENTRIES:]
-    memory["world_picture"] = wp
+    _extend_and_cap_list(wp, "core_principles", new_p, MAX_WORLD_PICTURE_ENTRIES)
+    _extend_and_cap_list(wp, "unresolved_paradoxes", new_px, MAX_WORLD_PICTURE_ENTRIES)
+    _extend_and_cap_list(wp, "conceptual_links", new_l, MAX_WORLD_PICTURE_ENTRIES)
 
     proposed = parsed["next_target"] if parsed["next_target"] else "Теория информации"
     final_next, _ = _pick_next_query(memory, proposed)
     memory["next_query"] = final_next
 
-    ltk = memory.setdefault("long_term_knowledge", [])
-    if topic_title not in ltk:
-        ltk.append(topic_title)
-    memory["long_term_knowledge"] = ltk[-MAX_LONG_TERM_KNOWLEDGE_ENTRIES:]
+    _append_ltk(memory, topic_title)
 
 
 def _world_picture_cap_reached(memory):
@@ -772,10 +818,7 @@ def _world_picture_cap_reached(memory):
 
 def synthesize_world_picture(memory):
     """Запрашивает у LLM финальный синтез всей накопленной картины мира. Возвращает markdown-текст."""
-    wp = memory.get("world_picture", {})
-    principles = wp.get("core_principles", [])
-    paradoxes = wp.get("unresolved_paradoxes", [])
-    links = wp.get("conceptual_links", [])
+    wp, principles, paradoxes, links = _unpack_world_picture(memory)
 
     synthesis_blank = {
         "title": "Финальный синтез",
@@ -791,10 +834,7 @@ def synthesize_world_picture(memory):
 
 def build_synthesis_prompt(memory):
     """Строит system+user инструкции для финального синтеза картины мира. Возвращает (system, user)."""
-    wp = memory.get("world_picture", {})
-    principles = wp.get("core_principles", [])
-    paradoxes = wp.get("unresolved_paradoxes", [])
-    links = wp.get("conceptual_links", [])
+    wp, principles, paradoxes, links = _unpack_world_picture(memory)
     ltk = memory.get("long_term_knowledge", [])
 
     system_instruction = (
@@ -916,7 +956,7 @@ def build_session_prompt(memory, discovery):
         f"## Противоречия\n"
         f"- (Противоречие внутри текста или между текстом и картиной мира, с цитатой.)\n\n"
         f"## Связи с изученным\n"
-        f"- (Связь с одной из прошлых тем: {', '.join(memory.get('long_term_knowledge', [])[-10:])} — с цитатой из текста.)\n\n"
+        f"- (Связь с одной из прошлых тем: {', '.join(memory.get('long_term_knowledge', [])[-PROMPT_RECENT_TOPICS_COUNT:])} — с цитатой из текста.)\n\n"
         f"## Следующая цель исследования\n"
         f"(Одно слово или фраза для следующего поиска. Не повторяй то, что уже изучено.)"
     )
@@ -934,23 +974,13 @@ def _maybe_rotate_next_query(memory, target_query):
     if _WIKI_STATE["consecutive_empty"] < WIKI_EMPTY_ROTATE_AT:
         return ""
     recent = memory.setdefault("recent_queries", [])
-    new_next = target_query
-    for candidate in reversed(memory.get("long_term_knowledge", [])):
-        if candidate not in recent:
-            new_next = candidate
-            break
-    else:
-        for fallback in CYCLE_FALLBACK_TOPICS:
-            if fallback not in recent:
-                new_next = fallback
-                break
-    if new_next == target_query:
+    fb = _find_fallback_topic(memory, recent)
+    if fb is None or fb == target_query:
         return ""
-    memory["next_query"] = new_next
-    recent.insert(0, new_next)
-    del recent[MAX_RECENT_QUERIES:]
+    memory["next_query"] = fb
+    _push_recent_query(memory, fb)
     save_memory(memory)
-    return f" Ротация next_query → {new_next!r}."
+    return f" Ротация next_query → {fb!r}."
 
 
 def _maybe_run_synthesis(memory, discovery):
@@ -960,7 +990,7 @@ def _maybe_run_synthesis(memory, discovery):
     if not _world_picture_cap_reached(memory):
         return False
     synthesis_text = synthesize_world_picture(memory)
-    if "ERROR_REASON" in synthesis_text:
+    if _ERROR_SENTINEL in synthesis_text:
         render_dashboard(
             "СИНТЕЗ НЕ УДАЛСЯ",
             "Финальный синтез пропущен из-за сбоя сети. Цикл продолжится.",
@@ -1012,7 +1042,7 @@ def execute_session():
 
     system_instruction, user_prompt = build_session_prompt(memory, discovery)
     raw_response = ask_openrouter_agent(system_instruction, user_prompt, discovery)
-    if "ERROR_REASON" in raw_response:
+    if _ERROR_SENTINEL in raw_response:
         _bump_memory_counter(memory, "openrouter_fallback_count")
         _mark_failure(
             "КРИТИЧЕСКИЙ СБОЙ СЕТИ",
