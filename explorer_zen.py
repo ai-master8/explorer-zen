@@ -21,7 +21,7 @@ OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 AI_MODEL = "deepseek/deepseek-v4-flash"
 REASONING_EFFORT = "high"       # OpenRouter reasoning.effort: xhigh | high | medium | low | minimal | none
 
-LOOP_INTERVAL = 20               # Интервал сна после успешной сессии (в секундах)
+LOOP_INTERVAL = 40               # Интервал сна после успешной сессии (в секундах)
 LOOP_INTERVAL_FAILURE = 10       # Интервал сна после пропущенной/провальной сессии
 API_TIMEOUT = 60                  # Время ожидания ответа от OpenRouter (в секундах)
 WIKI_SEARCH_TIMEOUT = 8           # Таймаут поискового запроса к Википедии (в секундах)
