@@ -277,9 +277,9 @@ def _build_dashboard_lines(status, details, current_discovery):
     doc_extract = _strip_accents(current_discovery.get("extract", "-") if current_discovery else "-")
 
     columns, _ = _terminal_size()
-    max_field = max(20, columns - 18)
+    max_field = max(20, columns - 22)
     doc_title = _truncate(doc_title, max_field)
-    doc_extract = _truncate(doc_extract, max(20, columns - 14))
+    doc_extract = _truncate(doc_extract, max(20, columns - 22))
 
     cap = MAX_WORLD_PICTURE_ENTRIES
     cap_safe = cap if cap > 0 else 1
@@ -304,12 +304,13 @@ def _build_dashboard_lines(status, details, current_discovery):
     thinking_suffix = (
         f" · thinking:{REASONING_EFFORT}" if REASONING_EFFORT and REASONING_EFFORT != "none" else ""
     )
-    lines.append(
+    header = (
         _BOLD() + _CYAN() + "  КАЛИПСО" + _RESET()
         + sep + f"Сессия {session_num}"
         + sep + get_now()
         + sep + _DIM() + AI_MODEL + thinking_suffix + _RESET()
     )
+    lines.append(_truncate(header, columns))
     lines.append("")
     lines.append("  " + status_text)
     if details_text:
@@ -378,6 +379,8 @@ def _partial_render(lines):
                 out.write(new_line)
                 if not _USE_ANSI:
                     out.write("\n")
+                if _USE_ANSI and old_line is not None and len(old_line) > len(new_line):
+                    out.write(f"\x1b[{i + 2};1H\x1b[2K")
         else:
             if _USE_ANSI:
                 out.write(f"\x1b[{i + 1};1H\x1b[2K")
