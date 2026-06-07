@@ -8,6 +8,8 @@ import unicodedata
 import urllib.request
 import urllib.parse
 import urllib.error
+import re
+import difflib
 from datetime import datetime
 
 # ====================================================================
@@ -31,6 +33,7 @@ MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка lo
 BAR_WIDTH = 20                  # Ширина прогресс-баров картины мира (в символах)
 MAX_RECENT_QUERIES = 5          # Глубина истории next_query для детекции зацикливания
 WIKI_EMPTY_ROTATE_AT = 3        # Сколько подряд пустых Wiki-поисков до ротации next_query
+WIKI_EXTRACT_MAX_CHARS = 2500   # Длина extract'а, запрашиваемого у Wikipedia (символов)
 CYCLE_FALLBACK_TOPICS = (        # Запасные темы на случай зацикливания (не из Википедии)
     "Голографический принцип",
     "Квантовая запутанность",
@@ -390,7 +393,7 @@ def _default_memory():
                 "Теория информации неразрывно связана с термодинамикой энтропии."
             ]
         },
-        "next_query": "Природа человеческой сексуальности",
+        "next_query": "Теория всего",
         "long_term_knowledge": [],
         "wiki_fallback_count": 0,
         "openrouter_fallback_count": 0,
@@ -461,15 +464,24 @@ def search_wikipedia(query, discovery_context):
             actual_title = search_results[0]["title"]
 
         encoded_title = urllib.parse.quote(actual_title.replace(" ", "_"))
-        summary_url = f"https://ru.wikipedia.org/api/rest_v1/page/summary/{encoded_title}"
+        summary_url = (
+            f"https://ru.wikipedia.org/w/api.php?action=query"
+            f"&prop=extracts&exintro=1&explaintext=1"
+            f"&exchars={WIKI_EXTRACT_MAX_CHARS}"
+            f"&titles={encoded_title}&format=json"
+        )
 
         with urllib.request.urlopen(urllib.request.Request(summary_url, headers={'User-Agent': 'AI-Researcher-Agent/3.0 (https://localhost; contact: maintainer)'}), timeout=WIKI_SUMMARY_TIMEOUT) as res:
             data = json.loads(res.read().decode('utf-8'))
+            pages = data.get("query", {}).get("pages", {})
+            page = next(iter(pages.values())) if pages else {}
+            extract = page.get("extract", "Данные отсутствуют.").strip()
+            title = page.get("title", actual_title)
             _WIKI_STATE["consecutive_empty"] = 0
             return {
                 "source": "Википедия (Глубокий поиск)",
-                "title": data.get("title", actual_title),
-                "extract": data.get("extract", "Данные отсутствуют."),
+                "title": title,
+                "extract": extract,
                 "url": f"https://ru.wikipedia.org/wiki/{encoded_title}"
             }
     except Exception as e:
@@ -486,7 +498,7 @@ def ask_openrouter_agent(system_prompt, user_prompt, discovery_context):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.5
+        "temperature": 1.0
     }
 
     current_delay = BASE_DELAY
@@ -550,29 +562,83 @@ def parse_bullet_points(section_text):
             lines.append(clean)
     return lines
 
-def parse_llm_response(raw_response):
-    """Разбирает ответ LLM в пять именованных полей для записи в память и отчёт."""
-    thoughts = extract_section(raw_response, "## Научный анализ", "## Новые принципы вселенной")
-    raw_principles = extract_section(raw_response, "## Новые принципы вселенной", "## Обнаруженные парадоксы")
-    raw_paradoxes = extract_section(raw_response, "## Обнаруженные парадоксы", "## Сеть связей")
-    raw_links = extract_section(raw_response, "## Сеть связей", "## Следующая цель исследования")
+def parse_llm_response(raw_response, extract_text=""):
+    """Разбирает ответ LLM в пять именованных полей для записи в память и отчёт.
+    Если передан extract_text, выполняет grounding check: отбрасывает пункты
+    с fabricated цитатой (цитата есть в пункте, но дословно отсутствует в extract)."""
+    thoughts = extract_section(raw_response, "## Анализ текста", "## Новые инсайты")
+    raw_principles = extract_section(raw_response, "## Новые инсайты", "## Противоречия")
+    raw_paradoxes = extract_section(raw_response, "## Противоречия", "## Связи с изученным")
+    raw_links = extract_section(raw_response, "## Связи с изученным", "## Следующая цель исследования")
     next_target = extract_section(raw_response, "## Следующая цель исследования", None).replace('"', '').replace("'", "").strip()
+    new_p = parse_bullet_points(raw_principles)
+    new_px = parse_bullet_points(raw_paradoxes)
+    new_l = parse_bullet_points(raw_links)
+    if extract_text:
+        new_p, dropped_p = _grounding_filter(new_p, extract_text)
+        new_px, dropped_px = _grounding_filter(new_px, extract_text)
+        new_l, dropped_l = _grounding_filter(new_l, extract_text)
+        thoughts = (thoughts + "\n\n_Grounding: отброшено " + str(len(dropped_p) + len(dropped_px) + len(dropped_l))
+                    + " пунктов с fabricated цитатой._") if (dropped_p or dropped_px or dropped_l) else thoughts
     return {
         "thoughts": thoughts,
-        "new_p": parse_bullet_points(raw_principles),
-        "new_px": parse_bullet_points(raw_paradoxes),
-        "new_l": parse_bullet_points(raw_links),
+        "new_p": new_p,
+        "new_px": new_px,
+        "new_l": new_l,
         "next_target": next_target,
     }
 
 
+def _extract_quote(item_text):
+    """Извлекает первую кавычку-цитату из пункта (русские « » или лапки " ")."""
+    m = re.search(r'[«"' "'" r'](.+?)[»"' "'" r']', item_text)
+    return m.group(1) if m else None
+
+
+def _verify_grounded(quote, extract_text):
+    """Цитата дословно присутствует в extract (нормализовано по пробелам и регистру)."""
+    if not quote:
+        return False
+    norm = lambda s: re.sub(r'\s+', ' ', s).strip().lower()
+    return norm(quote) in norm(extract_text)
+
+
+def _grounding_filter(items, extract_text):
+    """Оставляет только пункты, которые либо без цитаты (LLM не следовал формату),
+    либо с цитатой, дословно присутствующей в extract. Возвращает (kept, dropped)."""
+    kept, dropped = [], []
+    for item in items:
+        quote = _extract_quote(item)
+        if quote is None:
+            kept.append(item)
+        elif _verify_grounded(quote, extract_text):
+            kept.append(item)
+        else:
+            dropped.append(item)
+    return kept, dropped
+
+
+def _is_duplicate(new_item, existing_items, threshold=0.85):
+    """Возвращает True, если new_item — перефразировка одного из последних 30 existing_items."""
+    norm_new = re.sub(r'[^\w\s]', '', new_item.lower()).strip()
+    if not norm_new:
+        return False
+    for ex in existing_items[-30:]:
+        norm_ex = re.sub(r'[^\w\s]', '', ex.lower()).strip()
+        if not norm_ex:
+            continue
+        if difflib.SequenceMatcher(None, norm_new, norm_ex).ratio() > threshold:
+            return True
+    return False
+
+
 def update_world_picture(memory, parsed, topic_title):
-    """Интегрирует распарсенный ответ в картину мира с соблюдением всех капов."""
+    """Интегрирует распарсенный ответ в картину мира с соблюдением всех капов и dedup."""
     wp = memory.setdefault("world_picture", {"core_principles": [], "unresolved_paradoxes": [], "conceptual_links": []})
 
-    new_p = parsed["new_p"]
-    new_px = parsed["new_px"]
-    new_l = parsed["new_l"]
+    new_p = [x for x in parsed["new_p"] if not _is_duplicate(x, wp.get("core_principles", []))]
+    new_px = [x for x in parsed["new_px"] if not _is_duplicate(x, wp.get("unresolved_paradoxes", []))]
+    new_l = [x for x in parsed["new_l"] if not _is_duplicate(x, wp.get("conceptual_links", []))]
 
     if new_p: wp.setdefault("core_principles", []).extend(new_p)
     if new_px: wp.setdefault("unresolved_paradoxes", []).extend(new_px)
@@ -728,23 +794,29 @@ def build_session_prompt(memory, discovery):
     system_instruction = (
         f"Ты — мыслящий ИИ-персонаж по имени {memory['character_name']}. Характер: {memory['biography']}\n\n"
         f"ТВОЯ ТЕКУЩАЯ КАРТИНА МИРА В ДОЛГОВРЕМЕННОЙ ПАМЯТИ:\n"
-        f"1. Доказанные законы вселенной: {json.dumps(wp.get('core_principles', []), ensure_ascii=False)}\n"
-        f"2. Нерешенные парадоксы: {json.dumps(wp.get('unresolved_paradoxes', []), ensure_ascii=False)}\n"
-        f"3. Сеть концептуальных связей: {json.dumps(wp.get('conceptual_links', []), ensure_ascii=False)}\n\n"
+        f"1. Известные законы: {json.dumps(wp.get('core_principles', []), ensure_ascii=False)}\n"
+        f"2. Известные противоречия: {json.dumps(wp.get('unresolved_paradoxes', []), ensure_ascii=False)}\n"
+        f"3. Связи между концепциями: {json.dumps(wp.get('conceptual_links', []), ensure_ascii=False)}\n\n"
         f"ЗАДАЧА:\n"
-        f"Изучи новые данные. Проведи глубокую философскую рефлексию. На основе этих размышлений выдели "
-        f"новые законы, парадоксы или связи, которые нужно НАВСЕГДА занести в твою долговременную память.\n\n"
+        f"Прочитай новые данные. Извлеки из них только то, что РЕАЛЬНО в них содержится — не додумывай. "
+        f"Не повторяй идеи, уже записанные в картину мира. Если нечего добавить — лучше напиши меньше, чем перефразируй старое.\n\n"
+        f"ЖЁСТКИЕ ПРАВИЛА:\n"
+        f"1. Каждый инсайт, противоречие и связь ДОЛЖНЫ содержать прямую цитату из текста в кавычках `«...»`. "
+        f"Если цитату из текста извлечь нельзя — пункт НЕ включается.\n"
+        f"2. В секциях «Новые инсайты», «Противоречия», «Связи с изученным» — НЕ БОЛЕЕ 2-3 пунктов в каждой. "
+        f"Меньше — лучше. Лучше один grounded, чем пять watered-down.\n"
+        f"3. Цитата должна быть ДОСЛОВНОЙ (можно с заменой окончаний для краткости), проверяемой по тексту.\n\n"
         f"ОФОРМИ ОТВЕТ СТРОГО ПО ШАБЛОНУ (Используй маркеры '##'):\n\n"
-        f"## Научный анализ\n"
-        f"(Твои развернутые размышления, связывающие прошлую картину мира с новым знанием. 2-3 абзаца.)\n\n"
-        f"## Новые принципы вселенной\n"
-        f"- (Сформулируй 1 краткий тезис/закон, который ты вывела и добавляешь в память. Если ничего фундаментального нет, оставь пустым.)\n\n"
-        f"## Обнаруженные парадоксы\n"
-        f"- (Сформулируй 1 противоречие или загадку, которая возникла у тебя в голове. Если нет, оставь пустым.)\n\n"
-        f"## Сеть связей\n"
-        f"- (Опиши 1 связь текущей темы с любой из прошлых изученных тем: {', '.join(memory.get('long_term_knowledge', [])[-10:])})\n\n"
+        f"## Анализ текста\n"
+        f"(2-3 абзаца: что в тексте утверждается, как это соотносится с твоей картиной мира.)\n\n"
+        f"## Новые инсайты\n"
+        f"- (Инсайт с обязательной цитатой из текста.)\n\n"
+        f"## Противоречия\n"
+        f"- (Противоречие внутри текста или между текстом и картиной мира, с цитатой.)\n\n"
+        f"## Связи с изученным\n"
+        f"- (Связь с одной из прошлых тем: {', '.join(memory.get('long_term_knowledge', [])[-10:])} — с цитатой из текста.)\n\n"
         f"## Следующая цель исследования\n"
-        f"(Одно слово или фраза для поиска информации в следующей сессии.)"
+        f"(Одно слово или фраза для следующего поиска. Не повторяй то, что уже изучено.)"
     )
     user_prompt = (
         f"Новые данные:\n"
@@ -852,7 +924,7 @@ def execute_session():
     memory["session_counter"] = memory.get("session_counter", 0) + 1
 
     render_dashboard("ПАРСИНГ ОТВЕТА", "Интеграция новых сущностей в семантические слои памяти", discovery)
-    parsed = parse_llm_response(raw_response)
+    parsed = parse_llm_response(raw_response, extract_text=discovery.get("extract", ""))
     update_world_picture(memory, parsed, discovery['title'])
     save_memory(memory)
 
