@@ -88,6 +88,22 @@ def _set_service_state(state, status, detail=""):
     state["detail"] = detail
 
 
+def _bump_memory_counter(memory, key):
+    """Инкрементирует memory[key] на 1 (с дефолтом 0). Используется для счётчиков сбоев."""
+    memory[key] = memory.get(key, 0) + 1
+
+
+def _mark_failure(status_text, details, discovery):
+    """Помечает сессию как неуспешную: флаг _LAST_SESSION_OK + отрисовка дашборда.
+
+    Счётчики (`_bump_memory_counter`) и форматирование `details` — ответственность caller'а,
+    потому что f-string с `memory[counter_key]` должен видеть значение **после** инкремента.
+    """
+    global _LAST_SESSION_OK
+    _LAST_SESSION_OK = False
+    render_dashboard(status_text, details, discovery)
+
+
 _USE_ANSI = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 _LAST_LINES: list = []
 _LAST_TERMINAL_SIZE: tuple = (0, 0)
@@ -286,39 +302,9 @@ def _render_bar(count, cap_val, color):
     return _sgr(color) + bar_str + _RESET()
 
 
-def _build_dashboard_lines(status, details, current_discovery):
-    mem = _load_memory_cached()
-    session_num = mem.get("session_counter", 0)
-    next_query = mem.get("next_query", "-")
-    wp = mem.get("world_picture", {})
-    laws_count = len(wp.get("core_principles", []))
-    paradoxes_count = len(wp.get("unresolved_paradoxes", []))
-    links_count = len(wp.get("conceptual_links", []))
-    fallback_count = mem.get("wiki_fallback_count", 0)
-    or_fallback_count = mem.get("openrouter_fallback_count", 0)
-
-    doc_title = _strip_accents(current_discovery.get("title", "-") if current_discovery else "-")
-    doc_src = current_discovery.get("source", "-") if current_discovery else "-"
-    doc_extract = _strip_accents(current_discovery.get("extract", "-") if current_discovery else "-")
-
-    columns, _ = _terminal_size()
-    max_field = max(_DASH_MIN_FIELD, columns - _DASH_FIELD_MARGIN)
-    doc_title = _truncate(doc_title, max_field)
-    doc_extract = _truncate(doc_extract, max(_DASH_MIN_FIELD, columns - _DASH_FIELD_MARGIN))
-
-    cap = MAX_WORLD_PICTURE_ENTRIES
-
-    bar_laws = _render_bar(laws_count, cap, 32)
-    bar_px = _render_bar(paradoxes_count, cap, 35)
-    bar_lnk = _render_bar(links_count, cap, 36)
-
-    status_color = _STATUS_COLOR.get(status, 36)
-    status_text = _sgr(1, status_color) + "●  " + status + _RESET()
-    details_text = _truncate(details, columns - _DASH_RIGHT_PAD) if details else ""
-
+def _header_line(session_num, columns):
+    """Строка заголовка: КАЛИПСО · Сессия N · время · модель · thinking:effort."""
     sep = _DIM() + "  · " + _RESET()
-
-    lines = []
     thinking_suffix = (
         f" · thinking:{REASONING_EFFORT}" if REASONING_EFFORT and REASONING_EFFORT != "none" else ""
     )
@@ -328,50 +314,110 @@ def _build_dashboard_lines(status, details, current_discovery):
         + sep + get_now()
         + sep + _DIM() + AI_MODEL + thinking_suffix + _RESET()
     )
-    lines.append(_truncate(header, columns))
-    lines.append("")
-    lines.append("  " + status_text)
-    if details_text:
-        lines.append("     " + _truncate(details_text, columns - 2 - _DASH_DETAIL_INDENT))
-    lines.append("")
-    lines.append(f"  Текущая тема:    {doc_title}")
-    lines.append(f"  Источник:        {doc_src}")
-    lines.append(f"  Текст:           {_DIM()}{doc_extract}{_RESET()}")
-    lines.append("")
-    lines.append("  " + _BOLD() + "Картина мира" + _RESET())
-    lines.append(f"    {_DIM()}§{_RESET()}  Законы       {laws_count:>4}/{cap}   {bar_laws}")
-    lines.append(f"    {_DIM()}?{_RESET()}  Парадоксы    {paradoxes_count:>4}/{cap}   {bar_px}")
-    lines.append(f"    {_DIM()}∞{_RESET()}  Связи        {links_count:>4}/{cap}   {bar_lnk}")
-    lines.append("")
+    return _truncate(header, columns)
+
+
+def _status_line(status, details, columns):
+    """Строки статуса: '●  STATUS' + опциональная '     details' под ним."""
+    status_color = _STATUS_COLOR.get(status, 36)
+    status_text = _sgr(1, status_color) + "●  " + status + _RESET()
+    lines = ["  " + status_text]
+    if details:
+        details_text = _truncate(details, columns - _DASH_RIGHT_PAD)
+        lines.append("     " + _truncate(details_text, columns - _DASH_RIGHT_PAD - _DASH_DETAIL_INDENT))
+    return lines
+
+
+def _article_lines(current_discovery, columns):
+    """Три строки: Текущая тема / Источник / Текст."""
+    doc_title = _strip_accents(current_discovery.get("title", "-") if current_discovery else "-")
+    doc_src = current_discovery.get("source", "-") if current_discovery else "-"
+    doc_extract = _strip_accents(current_discovery.get("extract", "-") if current_discovery else "-")
+    max_field = max(_DASH_MIN_FIELD, columns - _DASH_FIELD_MARGIN)
+    doc_title = _truncate(doc_title, max_field)
+    doc_extract = _truncate(doc_extract, max(_DASH_MIN_FIELD, columns - _DASH_FIELD_MARGIN))
+    return [
+        f"  Текущая тема:    {doc_title}",
+        f"  Источник:        {doc_src}",
+        f"  Текст:           {_DIM()}{doc_extract}{_RESET()}",
+    ]
+
+
+def _world_picture_lines(mem):
+    """Четыре строки: 'Картина мира' + три бара (законы/парадоксы/связи)."""
+    wp = mem.get("world_picture", {})
+    laws_count = len(wp.get("core_principles", []))
+    paradoxes_count = len(wp.get("unresolved_paradoxes", []))
+    links_count = len(wp.get("conceptual_links", []))
+    cap = MAX_WORLD_PICTURE_ENTRIES
+    bar_laws = _render_bar(laws_count, cap, 32)
+    bar_px = _render_bar(paradoxes_count, cap, 35)
+    bar_lnk = _render_bar(links_count, cap, 36)
+    return [
+        "  " + _BOLD() + "Картина мира" + _RESET(),
+        f"    {_DIM()}§{_RESET()}  Законы       {laws_count:>4}/{cap}   {bar_laws}",
+        f"    {_DIM()}?{_RESET()}  Парадоксы    {paradoxes_count:>4}/{cap}   {bar_px}",
+        f"    {_DIM()}∞{_RESET()}  Связи        {links_count:>4}/{cap}   {bar_lnk}",
+    ]
+
+
+def _services_line(mem):
+    """Одна строка: 'Сервисы: OK' (зелёным) или список проблем (жёлтым/красным)."""
+    fallback_count = mem.get("wiki_fallback_count", 0)
+    or_fallback_count = mem.get("openrouter_fallback_count", 0)
     wiki_state_status = _WIKI_STATE["status"]
     wiki_state_detail = _WIKI_STATE["detail"]
     or_state_status = _OPENROUTER_STATE["status"]
     or_state_detail = _OPENROUTER_STATE["detail"]
 
-    if (fallback_count == 0 and or_fallback_count == 0
-            and or_state_status == "ok" and wiki_state_status == "ok"):
-        lines.append(f"  Сервисы:  {_GREEN()}OK{_RESET()}")
-    else:
-        parts = []
-        sev = "warn"
-        if fallback_count > 0:
-            parts.append(f"Wikipedia {fallback_count}")
-        if or_fallback_count > 0:
-            parts.append(f"OpenRouter {or_fallback_count}")
-        if wiki_state_status in ("transient", "error"):
-            parts.append(f"Wikipedia: {wiki_state_detail}")
-            if wiki_state_status == "error":
-                sev = "err"
-        if or_state_status in ("transient", "error"):
-            parts.append(f"OpenRouter: {or_state_detail}")
-            if or_state_status == "error":
-                sev = "err"
-        color_fn = _RED if sev == "err" else _YELLOW
-        lines.append(f"  Сервисы:  {color_fn()}{' / '.join(parts)}{_RESET()}")
-    lines.append(f"  Цель:     {_BOLD()}{_truncate(next_query, columns - _DASH_GOAL_INDENT)}{_RESET()}")
-    lines.append(f"  Управление:  {_DIM()}Q — выход{_RESET()}")
+    all_ok = (fallback_count == 0 and or_fallback_count == 0
+              and or_state_status == "ok" and wiki_state_status == "ok")
+    if all_ok:
+        return f"  Сервисы:  {_GREEN()}OK{_RESET()}"
 
-    return lines
+    parts = []
+    sev = "warn"
+    if fallback_count > 0:
+        parts.append(f"Wikipedia {fallback_count}")
+    if or_fallback_count > 0:
+        parts.append(f"OpenRouter {or_fallback_count}")
+    if wiki_state_status in ("transient", "error"):
+        parts.append(f"Wikipedia: {wiki_state_detail}")
+        if wiki_state_status == "error":
+            sev = "err"
+    if or_state_status in ("transient", "error"):
+        parts.append(f"OpenRouter: {or_state_detail}")
+        if or_state_status == "error":
+            sev = "err"
+    color_fn = _RED if sev == "err" else _YELLOW
+    return f"  Сервисы:  {color_fn()}{' / '.join(parts)}{_RESET()}"
+
+
+def _footer_lines(next_query, columns):
+    """Две строки: 'Цель: ...' и 'Управление: Q — выход'."""
+    return [
+        f"  Цель:     {_BOLD()}{_truncate(next_query, columns - _DASH_GOAL_INDENT)}{_RESET()}",
+        f"  Управление:  {_DIM()}Q — выход{_RESET()}",
+    ]
+
+
+def _build_dashboard_lines(status, details, current_discovery):
+    """Собирает все строки дашборда из sub-helpers в правильном порядке."""
+    mem = _load_memory_cached()
+    columns, _ = _terminal_size()
+    session_num = mem.get("session_counter", 0)
+    next_query = mem.get("next_query", "-")
+    return (
+        [_header_line(session_num, columns), ""]
+        + _status_line(status, details, columns)
+        + [""]
+        + _article_lines(current_discovery, columns)
+        + [""]
+        + _world_picture_lines(mem)
+        + [""]
+        + [_services_line(mem)]
+        + _footer_lines(next_query, columns)
+    )
 
 
 def _full_render(lines):
@@ -949,10 +995,9 @@ def execute_session():
     discovery = search_wikipedia(target_query, blank_discovery)
 
     if not discovery:
-        memory["wiki_fallback_count"] = memory.get("wiki_fallback_count", 0) + 1
         rotated_msg = _maybe_rotate_next_query(memory, target_query)
-        _LAST_SESSION_OK = False
-        render_dashboard(
+        _bump_memory_counter(memory, "wiki_fallback_count")
+        _mark_failure(
             "СБОЙ КАНАЛА ДАННЫХ",
             f"Википедия не вернула ответ (подряд: {memory['wiki_fallback_count']}). Сессия пропущена.{rotated_msg}",
             blank_discovery
@@ -968,16 +1013,15 @@ def execute_session():
     system_instruction, user_prompt = build_session_prompt(memory, discovery)
     raw_response = ask_openrouter_agent(system_instruction, user_prompt, discovery)
     if "ERROR_REASON" in raw_response:
-        memory["openrouter_fallback_count"] = memory.get("openrouter_fallback_count", 0) + 1
-        _LAST_SESSION_OK = False
-        render_dashboard(
+        _bump_memory_counter(memory, "openrouter_fallback_count")
+        _mark_failure(
             "КРИТИЧЕСКИЙ СБОЙ СЕТИ",
             f"{raw_response} Сессия пропущена: память и отчёт не обновляются.",
             discovery
         )
         return
 
-    memory["session_counter"] = memory.get("session_counter", 0) + 1
+    _bump_memory_counter(memory, "session_counter")
 
     render_dashboard("ПАРСИНГ ОТВЕТА", "Интеграция новых сущностей в семантические слои памяти", discovery)
     parsed = parse_llm_response(raw_response, extract_text=discovery.get("extract", ""))
