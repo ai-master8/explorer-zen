@@ -470,7 +470,7 @@ def search_wikipedia(query, discovery_context):
         encoded_title = urllib.parse.quote(actual_title.replace(" ", "_"))
         summary_url = (
             f"https://ru.wikipedia.org/w/api.php?action=query"
-            f"&prop=extracts&exintro=1&explaintext=1"
+            f"&prop=extracts&explaintext=1"
             f"&exchars={WIKI_EXTRACT_MAX_CHARS}"
             f"&titles={encoded_title}&format=json"
         )
