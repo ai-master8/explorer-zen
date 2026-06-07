@@ -34,7 +34,7 @@ MAX_LONG_TERM_KNOWLEDGE_ENTRIES = 50  # Кап на размер списка lo
 BAR_WIDTH = 20                  # Ширина прогресс-баров картины мира (в символах)
 MAX_RECENT_QUERIES = 5          # Глубина истории next_query для детекции зацикливания
 WIKI_EMPTY_ROTATE_AT = 3        # Сколько подряд пустых Wiki-поисков до ротации next_query
-WIKI_EXTRACT_MAX_CHARS = 2500   # Длина extract'а, запрашиваемого у Wikipedia (символов)
+WIKI_EXTRACT_MAX_CHARS = 5000   # Длина extract'а, запрашиваемого у Wikipedia (символов)
 CYCLE_FALLBACK_TOPICS = (        # Запасные темы на случай зацикливания (не из Википедии)
     "Голографический принцип",
     "Квантовая запутанность",
