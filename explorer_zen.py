@@ -304,45 +304,55 @@ def _truncate(s, width):
         return ""
     return s[: width - 1] + "…"
 
+def _poll_quit_key_windows(seconds):
+    """Windows: msvcrt.kbhit() loop с проверкой Q/Й."""
+    import msvcrt
+    t_end = time.time() + seconds
+    while time.time() < t_end:
+        if msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            if ch in ('\x00', '\xe0'):
+                try:
+                    msvcrt.getwch()
+                except Exception:
+                    pass
+            elif ch.lower() in ('q', 'й'):
+                return True
+            return False
+        time.sleep(0.05)
+    return False
+
+
+def _poll_quit_key_unix(seconds):
+    """Unix: termios cbreak + select."""
+    import select
+    import tty
+    import termios
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        r, _, _ = select.select([sys.stdin], [], [], seconds)
+        if r:
+            ch = sys.stdin.read(1)
+            return ch.lower() in ('q', 'й')
+        return False
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSAFLUSH, old)
+        except Exception:
+            pass
+
+
 def _poll_quit_key(seconds):
     """Спит `seconds` секунд, возвращает True, если нажата Q (без Enter)."""
     if seconds <= 0:
         return False
     try:
         if os.name == 'nt':
-            import msvcrt
-            t_end = time.time() + seconds
-            while time.time() < t_end:
-                if msvcrt.kbhit():
-                    ch = msvcrt.getwch()
-                    if ch in ('\x00', '\xe0'):
-                        try:
-                            msvcrt.getwch()
-                        except Exception:
-                            pass
-                    elif ch.lower() in ('q', 'й'):
-                        return True
-                    return False
-                time.sleep(0.05)
-            return False
+            return _poll_quit_key_windows(seconds)
         if sys.stdin.isatty():
-            import select
-            import tty
-            import termios
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            try:
-                tty.setcbreak(fd)
-                r, _, _ = select.select([sys.stdin], [], [], seconds)
-                if r:
-                    ch = sys.stdin.read(1)
-                    return ch.lower() in ('q', 'й')
-                return False
-            finally:
-                try:
-                    termios.tcsetattr(fd, termios.TCSAFLUSH, old)
-                except Exception:
-                    pass
+            return _poll_quit_key_unix(seconds)
         time.sleep(seconds)
         return False
     except Exception:
@@ -599,6 +609,34 @@ def init_system():
     memory = _repair_memory_if_corrupt()
     _migrate_memory(memory)
 
+def _fetch_wiki_summary(actual_title):
+    """Запрашивает полный wikitext статьи с Википедии, возвращает dict {source, title, extract, url}."""
+    encoded_title = urllib.parse.quote(actual_title.replace(" ", "_"))
+    summary_url = (
+        f"https://ru.wikipedia.org/w/api.php?action=query"
+        f"&prop=revisions&rvprop=content&rvslots=main"
+        f"&titles={encoded_title}&format=json"
+    )
+    with urllib.request.urlopen(
+        urllib.request.Request(summary_url, headers={'User-Agent': WIKI_USER_AGENT}),
+        timeout=WIKI_SUMMARY_TIMEOUT
+    ) as res:
+        data = json.loads(res.read().decode('utf-8'))
+        pages = data.get("query", {}).get("pages", {})
+        page = next(iter(pages.values())) if pages else {}
+        revisions = page.get("revisions") or [{}]
+        content = revisions[0].get("slots", {}).get("main", {}).get("*", "") if revisions else ""
+        extract = _wikitext_to_plain(content)[:WIKI_EXTRACT_MAX_CHARS].strip() or "Данные отсутствуют."
+        title = page.get("title", actual_title)
+        _WIKI_STATE["consecutive_empty"] = 0
+        return {
+            "source": "Википедия (Глубокий поиск)",
+            "title": title,
+            "extract": extract,
+            "url": f"https://ru.wikipedia.org/wiki/{encoded_title}"
+        }
+
+
 def search_wikipedia(query, discovery_context):
     """Полнотекстовый поиск в Википедии с извлечением саммари и обновлением UI."""
     _set_service_state(_WIKI_STATE, "ok", "")
@@ -618,28 +656,7 @@ def search_wikipedia(query, discovery_context):
 
             actual_title = search_results[0]["title"]
 
-        encoded_title = urllib.parse.quote(actual_title.replace(" ", "_"))
-        summary_url = (
-            f"https://ru.wikipedia.org/w/api.php?action=query"
-            f"&prop=revisions&rvprop=content&rvslots=main"
-            f"&titles={encoded_title}&format=json"
-        )
-
-        with urllib.request.urlopen(urllib.request.Request(summary_url, headers={'User-Agent': WIKI_USER_AGENT}), timeout=WIKI_SUMMARY_TIMEOUT) as res:
-            data = json.loads(res.read().decode('utf-8'))
-            pages = data.get("query", {}).get("pages", {})
-            page = next(iter(pages.values())) if pages else {}
-            revisions = page.get("revisions") or [{}]
-            content = revisions[0].get("slots", {}).get("main", {}).get("*", "") if revisions else ""
-            extract = _wikitext_to_plain(content)[:WIKI_EXTRACT_MAX_CHARS].strip() or "Данные отсутствуют."
-            title = page.get("title", actual_title)
-            _WIKI_STATE["consecutive_empty"] = 0
-            return {
-                "source": "Википедия (Глубокий поиск)",
-                "title": title,
-                "extract": extract,
-                "url": f"https://ru.wikipedia.org/wiki/{encoded_title}"
-            }
+        return _fetch_wiki_summary(actual_title)
     except Exception as e:
         _WIKI_STATE["consecutive_empty"] += 1
         _set_service_state(_WIKI_STATE, "transient", f"{type(e).__name__}")
@@ -1009,6 +1026,26 @@ def _maybe_run_synthesis(memory, discovery):
     return True
 
 
+def _run_session_success(memory, discovery, raw_response):
+    """Success path: парсинг ответа, обновление мира, отчёт."""
+    global _LAST_SESSION_OK, _SYNTHESIS_DONE
+    _bump_memory_counter(memory, "session_counter")
+
+    render_dashboard("ПАРСИНГ ОТВЕТА", "Интеграция новых сущностей в семантические слои памяти", discovery)
+    parsed = parse_llm_response(raw_response, extract_text=discovery.get("extract", ""))
+    update_world_picture(memory, parsed, discovery['title'])
+    save_memory(memory)
+
+    if _maybe_run_synthesis(memory, discovery):
+        _SYNTHESIS_DONE = True
+
+    render_dashboard("КОМПИЛЯЦИЯ ОТЧЕТА", "Запись Markdown-документа на накопитель", discovery)
+    write_session_report(discovery, memory, parsed)
+
+    render_dashboard("СЕССИЯ УСПЕШНО СИНХРОНИЗИРОВАНА", f"Новая цель: {memory['next_query']}", discovery)
+    _LAST_SESSION_OK = True
+
+
 def execute_session():
     global _LAST_SESSION_OK, _SYNTHESIS_DONE
     init_system()
@@ -1051,21 +1088,7 @@ def execute_session():
         )
         return
 
-    _bump_memory_counter(memory, "session_counter")
-
-    render_dashboard("ПАРСИНГ ОТВЕТА", "Интеграция новых сущностей в семантические слои памяти", discovery)
-    parsed = parse_llm_response(raw_response, extract_text=discovery.get("extract", ""))
-    update_world_picture(memory, parsed, discovery['title'])
-    save_memory(memory)
-
-    if _maybe_run_synthesis(memory, discovery):
-        _SYNTHESIS_DONE = True
-
-    render_dashboard("КОМПИЛЯЦИЯ ОТЧЕТА", "Запись Markdown-документа на накопитель", discovery)
-    write_session_report(discovery, memory, parsed)
-
-    render_dashboard("СЕССИЯ УСПЕШНО СИНХРОНИЗИРОВАНА", f"Новая цель: {memory['next_query']}", discovery)
-    _LAST_SESSION_OK = True
+    _run_session_success(memory, discovery, raw_response)
 
 def main():
     if not OPENROUTER_API_KEY:
